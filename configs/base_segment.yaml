@@ -1,0 +1,52 @@
+# Base config for SAM/SAM2 segmentation fine-tuning
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: segment
+backend: transformers
+
+# Model
+model_name: facebook/sam2.1-hiera-small
+
+# Dataset (must be on HF Hub with image + mask columns)
+dataset_name: ""
+train_split: train
+eval_split: validation
+
+# Training
+num_train_epochs: 20
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+learning_rate: 1.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 4
+fp16: true
+dataloader_num_workers: 4
+
+# Augmentation
+image_size: 1024
+
+# Prompt type: bbox | point | both
+prompt_type: bbox
+
+# Loss
+loss_type: dice_ce
+dice_weight: 1.0
+ce_weight: 1.0
+
+# Backbone
+freeze_backbone: true
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: true
+metric_for_best_model: eval_iou
+greater_is_better: true
+
+# Promotion metric
+promotion_metric: iou
+
+# Hub
+push_to_hub: false

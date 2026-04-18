@@ -1,0 +1,45 @@
+# Base config for object detection (Transformers backend)
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: detect
+backend: transformers
+
+# Model
+model_name: ustc-community/dfine-small-coco
+
+# Dataset (must be on HF Hub)
+dataset_name: cppe-5
+train_split: train
+eval_split: test
+
+# Training
+num_train_epochs: 20
+per_device_train_batch_size: 8
+per_device_eval_batch_size: 8
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 1
+fp16: true
+dataloader_num_workers: 4
+
+# Augmentation
+image_size: 640
+use_albumentations: true
+
+# Backbone
+freeze_backbone: false
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: true
+metric_for_best_model: eval_mAP
+greater_is_better: true
+
+# Promotion metric
+promotion_metric: mAP
+
+# Hub
+push_to_hub: false

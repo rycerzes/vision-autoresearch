@@ -1,0 +1,45 @@
+# Base config for image classification
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: classify
+backend: transformers
+
+# Model (supports transformers or timm models)
+model_name: google/vit-base-patch16-224
+
+# Dataset (must be on HF Hub)
+dataset_name: food101
+train_split: train
+eval_split: validation
+
+# Training
+num_train_epochs: 10
+per_device_train_batch_size: 32
+per_device_eval_batch_size: 32
+learning_rate: 2.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 1
+fp16: true
+dataloader_num_workers: 4
+
+# Augmentation
+image_size: 224
+use_trivial_augment: true
+
+# Backbone
+freeze_backbone: false
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: true
+metric_for_best_model: eval_accuracy
+greater_is_better: true
+
+# Promotion metric
+promotion_metric: accuracy
+
+# Hub
+push_to_hub: false

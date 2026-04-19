@@ -1,0 +1,1 @@
+run_id	created_at	status	job_id	task_type	backend	campaign	experiment_id	worker_id	hypothesis	model_name	dataset_name	config_hash	parent_hash	candidate_hash	promotion_metric	promotion_metric_value	mAP	mAP_50	accuracy	iou	dice	training_seconds	total_seconds	peak_vram_mb	promoted	comment

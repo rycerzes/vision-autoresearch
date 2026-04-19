@@ -1,0 +1,20 @@
+{
+  "task_type": "detect",
+  "hash": "",
+  "parent_hash": "",
+  "model_name": "ustc-community/dfine-small-coco",
+  "dataset_name": "cppe-5",
+  "promotion_metric": "mAP",
+  "promotion_metric_value": null,
+  "mAP": null,
+  "mAP_50": null,
+  "created_at": "",
+  "job_id": "",
+  "campaign": "",
+  "experiment_id": "",
+  "worker_id": "",
+  "hypothesis": "",
+  "status": "",
+  "comment": "",
+  "promoted": false
+}

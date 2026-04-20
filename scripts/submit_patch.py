@@ -28,6 +28,7 @@ from local_results import (
     normalize_row,
     now_utc_iso,
     parse_float,
+    rebuild_live_state,
     stringify_field,
     truthy,
     write_json,
@@ -90,15 +91,6 @@ def build_run_id(
     return f"{base}-{suffix}"
 
 
-def rebuild_live_state(rows: list[dict[str, str]]) -> dict | None:
-    row = current_promoted_row(rows)
-    if row is None:
-        return None
-    snapshot = build_master_snapshot(row)
-    write_json(MASTER_PATH, snapshot)
-    return snapshot
-
-
 def write_master_config(config_path: Path, task_type: str) -> None:
     """Copy the promoted config into master_detail so refresh_master can restore it."""
     if not config_path.exists():
@@ -143,8 +135,12 @@ def main() -> int:
             raise SystemExit(f"No VISION AUTORESEARCH SUMMARY found in {args.log}")
     else:
         last_job = load_last_job()
-        if last_job and "log_path" in last_job:
-            log_path = Path(last_job["log_path"])
+        log_key = next(
+            (k for k in ("cached_log_path", "output_log_path", "log_path") if k in (last_job or {})),
+            None,
+        )
+        if last_job and log_key:
+            log_path = Path(last_job[log_key])
             if log_path.exists():
                 metrics = parse_summary(log_path.read_text(encoding="utf-8"))
             else:

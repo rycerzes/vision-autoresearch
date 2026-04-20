@@ -216,3 +216,36 @@ def current_master_snapshot(rows: list[dict[str, str]] | None = None) -> dict[st
     if row is None:
         return None
     return build_master_snapshot(row)
+
+
+def build_dag(rows: list[dict[str, str]]) -> dict[str, Any]:
+    """Build a DAG of promoted runs showing the lineage of experiments."""
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, str]] = []
+    for row in promoted_rows(rows):
+        node_id = row.get("candidate_hash", "")
+        parent_id = row.get("parent_hash", "")
+        nodes.append({
+            "id": node_id,
+            "run_id": row.get("run_id", ""),
+            "task_type": row.get("task_type", ""),
+            "promotion_metric": row.get("promotion_metric", ""),
+            "promotion_metric_value": parse_float(row.get("promotion_metric_value")),
+            "hypothesis": row.get("hypothesis", ""),
+            "created_at": row.get("created_at", ""),
+        })
+        if parent_id:
+            edges.append({"from": parent_id, "to": node_id})
+    return {"nodes": nodes, "edges": edges}
+
+
+def rebuild_live_state(rows: list[dict[str, str]]) -> dict[str, Any] | None:
+    """Rebuild master.json and dag.json from the results ledger."""
+    row = current_promoted_row(rows)
+    if row is None:
+        return None
+    snapshot = build_master_snapshot(row)
+    write_json(MASTER_PATH, snapshot)
+    dag = build_dag(rows)
+    write_json(DAG_PATH, dag)
+    return snapshot

@@ -1,131 +1,122 @@
 # Vision Autoresearch
 
-Autonomous vision model fine-tuning research swarm. Runs disciplined,
-single-change experiments on object detection, image classification, and
-segmentation models using Hugging Face Jobs for execution.
+Multi-agent experiment loop for vision model finetuning. Adapted from [multiautoresearch](https://github.com/burtenshaw/multiautoresearch) - same disciplined single-change methodology, but for vision tasks with YAML configs as the experiment surface instead of editing training scripts directly.
 
-## Supported Tasks
+Agents propose a hypothesis, change one config knob, run a finetune, and auto-promote when the metric beats the current master. Works locally on consumer GPUs or on HF Jobs.
 
-| Task | Script | Default Model | Metric |
-|------|--------|---------------|--------|
-| Object Detection | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
-| Image Classification | `train_classify.py` | `google/vit-base-patch16-224` | accuracy |
-| Segmentation | `train_segment.py` | `facebook/sam2.1-hiera-small` | IoU |
+## Tasks
 
-All metrics are **higher-is-better**. Promotion happens automatically when a
-run beats the current master.
+| Task | Script | Default Model | Dataset | Metric |
+|------|--------|---------------|---------|--------|
+| Classify | `train_classify.py` | `google/vit-base-patch16-224` | food101 | accuracy |
+| Detect | `train_detect.py` | `ustc-community/dfine-small-coco` | cppe-5 | mAP |
+| Segment | `train_segment.py` | `facebook/sam2.1-hiera-small` | — | IoU |
+
+All metrics are higher-is-better.
 
 ## Setup
 
 ```bash
 uv sync
-huggingface-cli login
 ```
 
-## Quick Start
-
-### Object Detection (CPPE-5)
+## Run locally (single GPU)
 
 ```bash
 uv run scripts/refresh_master.py
-# edit configs/base_detect.yaml (one knob change)
-uv run prepare.py --dataset cppe-5 --task detect --split train
-uv run scripts/hf_job.py preflight --task detect
-uv run scripts/hf_job.py launch --task detect --config configs/base_detect.yaml
-uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log
-uv run scripts/parse_metric.py /tmp/vision-run.log
-uv run scripts/submit_patch.py --comment "detect: <hypothesis>"
-```
-
-### Image Classification (Food-101)
-
-```bash
-uv run scripts/refresh_master.py
-# edit configs/base_classify.yaml (one knob change)
+# edit configs/base_classify.yaml — one knob change
 uv run prepare.py --dataset food101 --task classify --split train
+CUDA_VISIBLE_DEVICES=0 uv run scripts/run_local.py --task classify --config configs/base_classify.yaml
+uv run scripts/submit_patch.py --comment "classify: lr 1e-4"
+```
+
+## Run on HF Jobs
+
+```bash
+uv run scripts/refresh_master.py
 uv run scripts/hf_job.py launch --task classify --config configs/base_classify.yaml
 uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log
 uv run scripts/parse_metric.py /tmp/vision-run.log
-uv run scripts/submit_patch.py --comment "classify: <hypothesis>"
+uv run scripts/submit_patch.py --comment "classify: lr 1e-4"
 ```
 
-### Segmentation
+## Agent-driven (opencode)
+
+Send a single prompt — the agent handles refresh, config edit, run, parse, and submit:
 
 ```bash
-uv run scripts/refresh_master.py
-# edit configs/base_segment.yaml (one knob change)
-uv run prepare.py --dataset <name> --task segment --split train
-uv run scripts/hf_job.py launch --task segment --config configs/base_segment.yaml
-uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log
-uv run scripts/parse_metric.py /tmp/vision-run.log
-uv run scripts/submit_patch.py --comment "segment: <hypothesis>"
+CUDA_VISIBLE_DEVICES=0 opencode run "
+Finetune google/vit-base-patch16-224 on food101 using the classify task.
+Read AGENTS.md for repo conventions. Follow the standard workflow end-to-end.
+"
 ```
 
-### Local Execution
+For parallel experiments on multi-GPU:
 
 ```bash
-uv run scripts/run_local.py --task detect --config configs/base_detect.yaml
+CUDA_VISIBLE_DEVICES=0 uv run scripts/opencode_worker.py run exp-01 &
+CUDA_VISIBLE_DEVICES=1 uv run scripts/opencode_worker.py run exp-02 &
 ```
 
-## Operating Model
+Each worker runs in an isolated git worktree under `.runtime/worktrees/`.
 
-1. **Config YAML is the experiment surface.** Edit `configs/*.yaml`, never
-   training scripts.
+## How it works
+
+1. **Config YAML is the experiment surface.** Edit `configs/*.yaml`, never training scripts. Configs are parsed natively via `HfArgumentParser.parse_yaml_file()` — keys map 1:1 to `TrainingArguments` / dataclass fields.
 2. **One hypothesis per run.** Change exactly one config knob per experiment.
-3. **Refresh before each experiment.** `uv run scripts/refresh_master.py`
-   restores the config to the current promoted master.
-4. **Record every run.** `uv run scripts/submit_patch.py --comment "..."`
-   appends to `research/results.tsv` and promotes if the metric beats master.
-5. **Local promoted master is the source of truth.** See
-   `research/live/master.json` and `research/results.tsv`.
+3. **Refresh before each experiment.** `refresh_master.py` restores configs to the current promoted master.
+4. **Auto-promotion.** `submit_patch.py` appends to `research/results.tsv` and promotes the config if the metric beats master.
+5. **`research/live/master.json`** is the source of truth.
 
-## Config Knobs
+## Config knobs
 
-Experiments typically modify these YAML keys:
+```yaml
+learning_rate, weight_decay, warmup_steps, lr_scheduler_type
+per_device_train_batch_size, gradient_accumulation_steps
+num_train_epochs, fp16
+freeze_backbone, image_square_size (detect)
+use_albumentations (detect), prompt_type (segment)
+```
 
-- `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`
-- `per_device_train_batch_size`, `gradient_accumulation_steps`
-- `num_train_epochs`
-- `image_size`, `use_albumentations`, `use_trivial_augment`
-- `freeze_backbone`, `prompt_type`, `loss_type`
-
-## Agent-Driven Sessions
-
-Point an AI agent at `AGENTS.md` and `program.md` for the full operating
-contract. Example prompts:
-
-> Run a detection experiment on CPPE-5 testing lr=1e-4 vs the current master.
-
-> Plan a classification campaign on Food-101 exploring augmentation strategies.
-
-> What has been tried so far? Summarize research/results.tsv.
-
-## Repo Layout
+## Repo layout
 
 ```
-configs/              Base and experiment config YAMLs
-train_detect.py       Object detection training (stable, do not edit)
-train_classify.py     Image classification training (stable, do not edit)
-train_segment.py      Segmentation training (stable, do not edit)
-prepare.py            Dataset validation (never edit)
-scripts/
-  hf_job.py           HF Jobs launcher (preflight, launch, logs)
-  submit_patch.py     Record run and promote
-  refresh_master.py   Restore config from promoted master
-  parse_metric.py     Parse metrics from training logs
-  run_local.py        Local GPU execution
-  local_results.py    Results ledger management
-  worker_common.py    Worktree isolation
-  trackio_reporter.py Experiment monitoring
-  dataset_inspector.py Dataset format validation
-  estimate_cost.py    Cost estimation
-research/
-  results.tsv         Append-only run ledger
-  notes.md            Experiment notebook
-  do-not-repeat.md    Failed experiment guidance
-  paper-ideas.md      Literature-derived hypotheses
-  live/               Current promoted master and DAG
-  campaigns/          Active campaign docs
-  experiments/        Experiment docs
-  templates/          Campaign, experiment, do-not-repeat templates
+.
+├── configs/
+│   ├── base_classify.yaml
+│   ├── base_detect.yaml
+│   └── base_segment.yaml
+├── train_classify.py          # stable — do not edit
+├── train_detect.py            # stable — do not edit
+├── train_segment.py           # stable — do not edit
+├── prepare.py                 # dataset validation — do not edit
+├── scripts/
+│   ├── refresh_master.py      # restore config from promoted master
+│   ├── run_local.py           # local GPU execution
+│   ├── hf_job.py              # HF Jobs launcher
+│   ├── parse_metric.py        # extract metrics from logs
+│   ├── submit_patch.py        # record run + auto-promote
+│   ├── opencode_worker.py     # agent worktree isolation
+│   ├── worker_common.py       # shared worker utilities
+│   ├── trackio_reporter.py    # experiment monitoring
+│   ├── dataset_inspector.py   # dataset format validation
+│   ├── estimate_cost.py       # cost estimation
+│   └── local_results.py       # results ledger management
+├── research/
+│   ├── results.tsv            # append-only run ledger
+│   ├── notes.md               # experiment notebook
+│   ├── do-not-repeat.md       # failed experiment guidance
+│   ├── paper-ideas.md         # literature-derived hypotheses
+│   ├── live/                  # promoted master + DAG
+│   ├── reference/             # seed master snapshots
+│   ├── campaigns/             # active campaign docs
+│   ├── experiments/           # per-experiment docs
+│   └── templates/             # campaign/experiment templates
+├── AGENTS.md                  # agent roles + rules
+├── program.md                 # benchmark entrypoint
+└── pyproject.toml
 ```
+
+## Acknowledgments
+
+Based on [multiautoresearch](https://github.com/burtenshaw/multiautoresearch) by [@burtenshaw](https://github.com/burtenshaw).

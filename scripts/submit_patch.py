@@ -94,6 +94,7 @@ def build_run_id(
 
 def write_master_config(config_path: Path, task_type: str) -> None:
     """Copy the promoted config into master_detail so refresh_master can restore it."""
+    config_path = config_path.resolve()
     if not config_path.exists():
         return
     config_text = config_path.read_text(encoding="utf-8")

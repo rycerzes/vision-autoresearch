@@ -12,12 +12,10 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import yaml
 from datasets import load_dataset
 from torch.utils.data import Dataset
 
@@ -239,40 +237,11 @@ class ModelArguments:
     trust_remote_code: bool = field(default=False, metadata={"help": "Trust remote code."})
 
 
-# Config YAML loading
-
-def load_config_yaml(yaml_path: str) -> list[str]:
-    """Load a YAML config and convert to CLI-style args for HfArgumentParser."""
-    with open(yaml_path) as f:
-        config = yaml.safe_load(f)
-
-    key_map = {
-        "model_name": "model_name_or_path",
-        "dataset_name": "dataset_name",
-        "freeze_backbone": "freeze_backbone",
-        "freeze_prompt_encoder": "freeze_prompt_encoder",
-    }
-
-    args = []
-    skip_keys = {"task_type", "backend", "promotion_metric", "loss_type",
-                 "dice_weight", "ce_weight", "image_size"}
-    for key, value in config.items():
-        if key in skip_keys:
-            continue
-        mapped_key = key_map.get(key, key)
-        if isinstance(value, bool):
-            if value:
-                args.append(f"--{mapped_key}")
-        else:
-            args.extend([f"--{mapped_key}", str(value)])
-    return args
-
-
 # Structured summary for parse_metric.py
 
 def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, peak_vram_mb: float):
     print("\n--- VISION AUTORESEARCH SUMMARY ---")
-    print(f"task_type: segment")
+    print("task_type: segment")
     print(f"iou: {metrics.get('eval_iou', metrics.get('iou', 0.0))}")
     print(f"dice: {metrics.get('eval_dice', metrics.get('dice', 0.0))}")
     print(f"training_seconds: {training_seconds:.1f}")
@@ -288,11 +257,11 @@ def main():
     start_time = time.time()
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    parser.set_defaults(per_device_train_batch_size=4, num_train_epochs=30)
 
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
-        config_args = load_config_yaml(sys.argv[1])
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses(args=config_args)
+        model_args, data_args, training_args = parser.parse_yaml_file(
+            yaml_file=os.path.abspath(sys.argv[1]), allow_extra_keys=True
+        )
     elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         model_args, data_args, training_args = parser.parse_json_file(
             json_file=os.path.abspath(sys.argv[1])

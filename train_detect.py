@@ -19,7 +19,6 @@ from typing import Any
 import albumentations as A
 import numpy as np
 import torch
-import yaml
 from datasets import load_dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
@@ -337,41 +336,12 @@ class ModelArguments:
     )
 
 
-# Config YAML loading
-
-def load_config_yaml(yaml_path: str) -> list[str]:
-    """Load a YAML config and convert it to CLI-style args for HfArgumentParser."""
-    with open(yaml_path) as f:
-        config = yaml.safe_load(f)
-
-    # Map config keys to HfArgumentParser args
-    key_map = {
-        "model_name": "model_name_or_path",
-        "dataset_name": "dataset_name",
-        "image_size": "image_square_size",
-        "freeze_backbone": "freeze_backbone",
-    }
-
-    args = []
-    skip_keys = {"task_type", "backend", "promotion_metric", "use_albumentations"}
-    for key, value in config.items():
-        if key in skip_keys:
-            continue
-        mapped_key = key_map.get(key, key)
-        if isinstance(value, bool):
-            if value:
-                args.append(f"--{mapped_key}")
-        else:
-            args.extend([f"--{mapped_key}", str(value)])
-    return args
-
-
 # Structured summary for parse_metric.py
 
 def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, peak_vram_mb: float):
     """Print structured summary block that parse_metric.py can extract."""
     print("\n--- VISION AUTORESEARCH SUMMARY ---")
-    print(f"task_type: detect")
+    print("task_type: detect")
     print(f"mAP: {metrics.get('map', metrics.get('eval_map', 0.0))}")
     print(f"mAP_50: {metrics.get('map_50', metrics.get('eval_map_50', 0.0))}")
     print(f"mAR: {metrics.get('mar_100', metrics.get('eval_mar_100', 0.0))}")
@@ -391,8 +361,9 @@ def main():
 
     # Support: train_detect.py config.yaml | train_detect.py --arg1 val1 ...
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
-        config_args = load_config_yaml(sys.argv[1])
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses(args=config_args)
+        model_args, data_args, training_args = parser.parse_yaml_file(
+            yaml_file=os.path.abspath(sys.argv[1]), allow_extra_keys=True
+        )
     elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:

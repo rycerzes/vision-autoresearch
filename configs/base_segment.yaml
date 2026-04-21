@@ -5,7 +5,7 @@ task_type: segment
 backend: transformers
 
 # Model
-model_name: facebook/sam2.1-hiera-small
+model_name_or_path: facebook/sam2.1-hiera-small
 
 # Dataset (must be on HF Hub with image + mask columns)
 dataset_name: ""
@@ -23,6 +23,8 @@ lr_scheduler_type: cosine
 gradient_accumulation_steps: 4
 fp16: true
 dataloader_num_workers: 4
+do_train: true
+do_eval: true
 
 # Augmentation
 image_size: 1024

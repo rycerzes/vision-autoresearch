@@ -5,7 +5,7 @@ task_type: detect
 backend: transformers
 
 # Model
-model_name: ustc-community/dfine-small-coco
+model_name_or_path: ustc-community/dfine-small-coco
 
 # Dataset (must be on HF Hub)
 dataset_name: cppe-5
@@ -23,9 +23,11 @@ lr_scheduler_type: cosine
 gradient_accumulation_steps: 1
 fp16: true
 dataloader_num_workers: 4
+do_train: true
+do_eval: true
 
 # Augmentation
-image_size: 640
+image_square_size: 640
 use_albumentations: true
 
 # Backbone

@@ -31,7 +31,7 @@ Supported tasks:
 | classify | train_classify.py | configs/base_classify.yaml | accuracy |
 | segment | train_segment.py | configs/base_segment.yaml | IoU |
 
-Tunable config knobs include: `learning_rate`, `weight_decay`, `warmup_ratio`, `lr_scheduler_type`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `image_size`, `use_albumentations`, `use_trivial_augment`, `freeze_backbone`, `prompt_type`, `loss_type`, `num_train_epochs`.
+Tunable config knobs include: `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `image_size`, `use_albumentations`, `use_trivial_augment`, `freeze_backbone`, `prompt_type`, `loss_type`, `num_train_epochs`.
 
 Rules:
 

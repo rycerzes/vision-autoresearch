@@ -41,7 +41,7 @@ YAML config files as the experiment surface. Each config is parsed by
 `HfArgumentParser` in the training scripts. Experiments modify config values
 such as:
 
-- `learning_rate`, `weight_decay`, `warmup_ratio`, `lr_scheduler_type`
+- `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`
 - `per_device_train_batch_size`, `gradient_accumulation_steps`
 - `image_size`, `use_albumentations`, `use_trivial_augment`
 - `freeze_backbone`, `prompt_type`, `loss_type`

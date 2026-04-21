@@ -83,7 +83,7 @@ uv run scripts/run_local.py --task detect --config configs/base_detect.yaml
 
 Experiments typically modify these YAML keys:
 
-- `learning_rate`, `weight_decay`, `warmup_ratio`, `lr_scheduler_type`
+- `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`
 - `per_device_train_batch_size`, `gradient_accumulation_steps`
 - `num_train_epochs`
 - `image_size`, `use_albumentations`, `use_trivial_augment`

@@ -22,6 +22,7 @@ from local_results import (
     config_hash,
     current_master_snapshot,
     current_promoted_row,
+    ensure_results_ledger,
     is_improvement,
     load_json,
     load_results_rows,
@@ -162,7 +163,7 @@ def main() -> int:
     c_hash = config_hash(config_path) if config_path.exists() else ""
 
     context = env_context()
-    existing_rows = load_results_rows()
+    existing_rows = ensure_results_ledger(task_type)
     current_master = current_master_snapshot(existing_rows)
 
     candidate_value = parse_float(metrics.get(promotion_metric))

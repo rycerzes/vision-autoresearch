@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -85,11 +86,17 @@ def ensure_worktree(target: Path) -> None:
 
 
 def worker_env(state: dict) -> dict[str, str]:
+    task = state.get("task", "detect")
     return {
         "VISION_CAMPAIGN": str(state.get("campaign", "")),
         "VISION_EXPERIMENT_ID": str(state["experiment_id"]),
         "VISION_WORKER_ID": str(state.get("worker_id", "")),
         "VISION_HYPOTHESIS": str(state.get("hypothesis", "")),
+        "VISION_TASK": task,
+        "VISION_CONFIG": str(state.get("config", f"configs/base_{task}.yaml")),
+        "VISION_LOG_PATH": str(
+            LIVE_DIR / f"{state['experiment_id']}.log"
+        ),
     }
 
 
@@ -155,3 +162,81 @@ def cleanup_worktree(experiment_id: str) -> None:
     state_path = worker_state_path(experiment_id)
     if state_path.exists():
         state_path.unlink()
+
+
+def require_tool(name: str) -> str:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    raise SystemExit(f"Could not find `{name}` in PATH")
+
+
+def build_worker_contract(state: dict) -> str:
+    """Build a full prompt string for an isolated experiment worker."""
+    task = state.get("task", "detect")
+    config = state.get("config", f"configs/base_{task}.yaml")
+    env = worker_env(state)
+
+    lines = [
+        "You are executing one isolated vision autoresearch experiment in this worktree.",
+        "",
+        f"Worktree: {state['worktree_path']}",
+        f"Campaign: {state.get('campaign', '')}",
+        f"Experiment id: {state['experiment_id']}",
+        f"Worker id: {state.get('worker_id', '')}",
+        f"Task: {task}",
+        f"Config: {config}",
+        f"Hypothesis: {state.get('hypothesis', '')}",
+        "",
+        "Read `AGENTS.md` first, then follow the repo rules exactly.",
+        "",
+        "Allowed edit scope:",
+        f"- edit `{config}` only",
+        "- never edit training scripts (`train_detect.py`, `train_classify.py`, `train_segment.py`)",
+        "- never edit `prepare.py`",
+        "- make exactly one config knob change",
+        "",
+        "Before editing:",
+        "- confirm the assigned hypothesis is still fresh relative to current master and recent notes",
+        "- confirm the expected benchmark command, log path, and worker id",
+        "- state the exact single config knob you will change",
+        "",
+        "Before launch, set the worker shell context explicitly:",
+        f"- `cd {shlex.quote(str(state['worktree_path']))}`",
+    ]
+    for key, value in env.items():
+        lines.append(f"- `export {key}={shlex.quote(value)}`")
+
+    lines.extend([
+        "",
+        "Execution contract:",
+        "- start from refreshed local master config, not stale local edits",
+        "- run `uv run scripts/refresh_master.py` before editing unless the parent confirms the worktree is already refreshed",
+        f"- run `uv run scripts/hf_job.py preflight --task {task}`",
+        f"- run `uv run scripts/hf_job.py launch --task {task} --config {config}`",
+        f"- stream logs with `uv run scripts/hf_job.py logs <JOB_ID> --follow --output $VISION_LOG_PATH`",
+        "- parse the final metric with `uv run scripts/parse_metric.py <log-path>`",
+        '- record the run with `uv run scripts/submit_patch.py --comment "..."`',
+        "- promotion only happens if the promotion metric beats current master (higher-is-better)",
+        "",
+        "Final report must include:",
+        "- hypothesis tested",
+        "- task type and model",
+        "- parent master hash",
+        "- exact single config knob changed",
+        "- log path used",
+        "- promotion metric value or failure state",
+        "- submit or no-submit",
+        "- one short interpretation",
+        "- one short note for `memory-keeper`",
+        "",
+        "Stop and report back instead of improvising if:",
+        "- master changed materially",
+        "- the task requires editing training scripts",
+        "- the hypothesis is stale or duplicated by newer evidence",
+        "- the run fails to produce a valid metric",
+        "",
+        "Do not edit the durable note in the main checkout from this worktree. "
+        "In your final response, include the note text that `memory-keeper` should record.",
+    ])
+    return "\n".join(lines)

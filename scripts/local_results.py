@@ -77,6 +77,11 @@ def write_json(path: Path, payload: dict[str, Any] | list[Any]) -> None:
 def config_hash(config_path: Path) -> str:
     """Hash a YAML config file for change tracking."""
     text = config_path.read_text(encoding="utf-8")
+    return config_hash_from_text(text)
+
+
+def config_hash_from_text(text: str) -> str:
+    """Hash config text for change tracking."""
     text = text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n") + "\n"
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
@@ -162,6 +167,79 @@ def append_result_row(row: dict[str, object]) -> dict[str, str]:
 def promoted_rows(rows: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     resolved_rows = rows if rows is not None else load_results_rows()
     return [row for row in resolved_rows if truthy(row.get("promoted"))]
+
+
+def reference_master_metadata() -> dict[str, Any]:
+    """Load the best available master metadata (live > seed)."""
+    for path in (MASTER_PATH, MASTER_SEED_PATH):
+        data = load_json(path)
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def seed_config_content(task_type: str) -> str:
+    """Return the base config content for seeding. Checks the config file first,
+    then falls back to master_detail."""
+    config_path = CONFIGS_DIR / f"base_{task_type}.yaml"
+    if config_path.exists():
+        return config_path.read_text(encoding="utf-8")
+    detail = load_json(MASTER_DETAIL_PATH) or load_json(MASTER_DETAIL_SEED_PATH)
+    if isinstance(detail, dict):
+        content = detail.get("config_content")
+        if isinstance(content, str) and content:
+            return content
+    raise RuntimeError(
+        f"Could not determine seed config; configs/base_{task_type}.yaml "
+        "and master_detail are both missing"
+    )
+
+
+def seed_row(task_type: str = "detect") -> dict[str, object]:
+    """Build a synthetic seed row from the base config."""
+    metadata = reference_master_metadata()
+    seed_task = metadata.get("task_type") or task_type
+    content = seed_config_content(seed_task)
+    c_hash = config_hash_from_text(content)
+    return {
+        "run_id": "legacy_seed",
+        "created_at": metadata.get("created_at") or now_utc_iso(),
+        "status": "legacy_seed",
+        "job_id": metadata.get("job_id", ""),
+        "task_type": seed_task,
+        "backend": metadata.get("backend", "transformers"),
+        "campaign": "legacy-baseline",
+        "experiment_id": "legacy-seed",
+        "worker_id": "seed",
+        "hypothesis": f"seed local master from base_{seed_task}.yaml",
+        "model_name": metadata.get("model_name", ""),
+        "dataset_name": metadata.get("dataset_name", ""),
+        "config_hash": c_hash,
+        "parent_hash": metadata.get("parent_hash", ""),
+        "candidate_hash": c_hash,
+        "promotion_metric": metadata.get("promotion_metric", ""),
+        "promotion_metric_value": metadata.get("promotion_metric_value", ""),
+        "mAP": metadata.get("mAP", ""),
+        "mAP_50": metadata.get("mAP_50", ""),
+        "accuracy": metadata.get("accuracy", ""),
+        "iou": metadata.get("iou", ""),
+        "dice": metadata.get("dice", ""),
+        "training_seconds": "",
+        "total_seconds": "",
+        "peak_vram_mb": "",
+        "promoted": True,
+        "comment": metadata.get("comment") or f"Seeded local master from base_{seed_task}.yaml",
+    }
+
+
+def ensure_results_ledger(task_type: str = "detect") -> list[dict[str, str]]:
+    """Load results.tsv, auto-seeding if empty."""
+    rows = load_results_rows()
+    if rows:
+        return rows
+    seeded = seed_row(task_type)
+    write_results_rows([seeded])
+    return [normalize_row(seeded)]
 
 
 def current_promoted_row(rows: list[dict[str, str]] | None = None) -> dict[str, str] | None:

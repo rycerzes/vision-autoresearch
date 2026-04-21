@@ -14,8 +14,8 @@ from local_results import (
     MASTER_PATH,
     ROOT,
     current_promoted_row,
+    ensure_results_ledger,
     load_json,
-    load_results_rows,
     write_json,
     build_master_snapshot,
 )
@@ -52,7 +52,7 @@ def restore_config(task_type: str, force: bool = False) -> dict:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(config_content, encoding="utf-8")
 
-    rows = load_results_rows()
+    rows = ensure_results_ledger(task_type)
     row = current_promoted_row(rows)
     if row:
         snapshot = build_master_snapshot(row)

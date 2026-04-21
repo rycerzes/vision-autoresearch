@@ -100,6 +100,25 @@ For local GPU execution:
 - `research/results.tsv` — append-only local run ledger.
 - `research/live/` — current local promoted master and DAG.
 - `research/reference/` — seed master snapshots.
+- `research/notes.md` — experiment notebook.
+- `research/do-not-repeat.md` — failed experiment guidance.
+- `research/paper-ideas.md` — literature-derived hypotheses.
+- `research/templates/` — campaign, experiment, and do-not-repeat templates.
+- `research/campaigns/` — active campaign docs.
+- `research/experiments/` — experiment docs.
+- `scripts/` — orchestration scripts.
+- `program.md` — benchmark entrypoint note.
+
+## Literature Scouting
+
+When the task is planner or literature research rather than a benchmark run:
+
+- You may edit `research/*.md` and operator docs.
+- Translate papers into single-change config hypotheses.
+- Record paper-derived ideas in `research/paper-ideas.md`.
+- Do not claim a win without a benchmark run.
+- `research/live/` — current local promoted master and DAG.
+- `research/reference/` — seed master snapshots.
 - `research/templates/` — campaign, experiment, and do-not-repeat templates.
 - `research/campaigns/` — active campaign docs.
 - `research/experiments/` — experiment docs.

@@ -1,0 +1,47 @@
+# Base config for Ultralytics YOLO object detection
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: detect_yolo
+backend: ultralytics
+
+# Model (Ultralytics checkpoint name or path, e.g. yolo11n.pt)
+model_name_or_path: yolo11n.pt
+
+# Dataset (HF Hub — same detection schema as task `detect`)
+dataset_name: cppe-5
+train_split: train
+eval_split: test
+
+# Training (TrainingArguments-compatible where noted)
+num_train_epochs: 20
+per_device_train_batch_size: 8
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 0
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 1
+fp16: true
+dataloader_num_workers: 4
+do_train: true
+do_eval: true
+seed: 42
+
+# YOLO / data
+image_square_size: 640
+max_train_samples: null
+max_eval_samples: null
+
+# Evaluation / checkpointing (unused by Ultralytics trainer; kept for YAML parity)
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: false
+metric_for_best_model: map50
+greater_is_better: true
+
+# Promotion metric (parsed from summary as mAP)
+promotion_metric: mAP
+
+# Hub
+push_to_hub: false
+output_dir: ./outputs/detect_yolo
+run_name: detect_yolo-run

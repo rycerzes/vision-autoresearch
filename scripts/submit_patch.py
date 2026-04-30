@@ -45,9 +45,26 @@ LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
 METRIC_FOR_TASK = {
     "detect": "mAP",
     "detect_yolo": "mAP",
+    "track_yolo": "mAP",
+    "segment_yolo": "iou",
+    "classify_yolo": "accuracy",
+    "pose_yolo": "mAP",
+    "obb_yolo": "mAP",
     "classify": "accuracy",
     "segment": "iou",
 }
+
+_SUBMIT_TASK_CHOICES = [
+    "detect",
+    "classify",
+    "segment",
+    "detect_yolo",
+    "track_yolo",
+    "segment_yolo",
+    "classify_yolo",
+    "pose_yolo",
+    "obb_yolo",
+]
 
 
 def env_context() -> dict[str, str]:
@@ -121,9 +138,7 @@ def main() -> int:
     )
     parser.add_argument("--config", type=Path, help="Config YAML used for this run")
     parser.add_argument(
-        "--task",
-        choices=["detect", "classify", "segment", "detect_yolo"],
-        help="Task type",
+        "--task", choices=_SUBMIT_TASK_CHOICES, help="Task type"
     )
     parser.add_argument("--job-id", help="HF Job ID for this run")
     parser.add_argument(

@@ -289,6 +289,11 @@ def _try_json(value) -> Any:
 VALIDATORS = {
     "detect": validate_detection_schema,
     "detect_yolo": validate_detection_schema,
+    "track_yolo": validate_detection_schema,
+    "segment_yolo": validate_segmentation_schema,
+    "classify_yolo": validate_classification_schema,
+    "pose_yolo": validate_detection_schema,
+    "obb_yolo": validate_detection_schema,
     "classify": validate_classification_schema,
     "segment": validate_segmentation_schema,
 }
@@ -296,6 +301,11 @@ VALIDATORS = {
 INSPECTORS = {
     "detect": inspect_detection_samples,
     "detect_yolo": inspect_detection_samples,
+    "track_yolo": inspect_detection_samples,
+    "segment_yolo": inspect_segmentation_samples,
+    "classify_yolo": inspect_classification_samples,
+    "pose_yolo": inspect_detection_samples,
+    "obb_yolo": inspect_detection_samples,
     "classify": inspect_classification_samples,
     "segment": inspect_segmentation_samples,
 }
@@ -403,7 +413,17 @@ def main():
     parser.add_argument(
         "--task",
         required=True,
-        choices=["detect", "detect_yolo", "classify", "segment"],
+        choices=[
+            "detect",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+            "classify",
+            "segment",
+        ],
     )
     parser.add_argument("--split", default="train")
     parser.add_argument("--config", default=None, help="Dataset config name")

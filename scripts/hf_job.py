@@ -30,12 +30,22 @@ TERMINAL_JOB_STAGES = {
 }
 DEFAULT_NAMESPACE = os.environ.get("VISION_HF_NAMESPACE")
 
+_ULTRA_TASKS = (
+    "detect_yolo",
+    "track_yolo",
+    "segment_yolo",
+    "classify_yolo",
+    "pose_yolo",
+    "obb_yolo",
+)
 TASK_SCRIPTS = {
     "detect": "train_detect.py",
     "classify": "train_classify.py",
     "segment": "train_segment.py",
-    "detect_yolo": "train_detect_yolo.py",
+    **dict.fromkeys(_ULTRA_TASKS, "train_ultralytics.py"),
 }
+
+_CLI_TASKS = ["detect", "classify", "segment"] + list(_ULTRA_TASKS)
 
 SUMMARY_KEYS = {
     "task_type",
@@ -563,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_p.add_argument(
         "--task",
         required=True,
-        choices=["detect", "classify", "segment", "detect_yolo"],
+        choices=_CLI_TASKS,
     )
     preflight_p.add_argument(
         "--config", help="Config YAML path (defaults to configs/base_<task>.yaml)"
@@ -575,7 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     launch_p.add_argument(
         "--task",
         required=True,
-        choices=["detect", "classify", "segment", "detect_yolo"],
+        choices=_CLI_TASKS,
     )
     launch_p.add_argument(
         "--config", help="Config YAML path (defaults to configs/base_<task>.yaml)"

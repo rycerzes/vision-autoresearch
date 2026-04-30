@@ -97,7 +97,17 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument(
         "--task",
         required=True,
-        choices=["detect", "classify", "segment", "detect_yolo"],
+        choices=[
+            "detect",
+            "classify",
+            "segment",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+        ],
         help="Vision task type",
     )
     create.add_argument("--config", help="Config YAML path (defaults to base config for task)")

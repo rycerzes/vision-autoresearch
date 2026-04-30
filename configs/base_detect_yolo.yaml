@@ -4,8 +4,8 @@
 task_type: detect_yolo
 backend: ultralytics
 
-# Model (Ultralytics checkpoint name or path, e.g. yolo11n.pt)
-model_name_or_path: yolo11n.pt
+# Model (Ultralytics checkpoint name or path, e.g. yolo26n.pt)
+model_name_or_path: yolo26n.pt
 
 # Dataset (HF Hub — same detection schema as task `detect`)
 dataset_name: cppe-5

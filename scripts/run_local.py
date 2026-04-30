@@ -12,12 +12,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+_ULTRA_TASKS = (
+    "detect_yolo",
+    "track_yolo",
+    "segment_yolo",
+    "classify_yolo",
+    "pose_yolo",
+    "obb_yolo",
+)
 TASK_SCRIPTS = {
     "detect": "train_detect.py",
     "classify": "train_classify.py",
     "segment": "train_segment.py",
-    "detect_yolo": "train_detect_yolo.py",
+    **dict.fromkeys(_ULTRA_TASKS, "train_ultralytics.py"),
 }
+
+_CLI_TASKS = ["detect", "classify", "segment"] + list(_ULTRA_TASKS)
 
 
 def resolve_task_from_config(config_path: Path) -> str | None:
@@ -34,7 +44,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a vision experiment locally.")
     parser.add_argument(
         "--task",
-        choices=["detect", "classify", "segment", "detect_yolo"],
+        choices=_CLI_TASKS,
         help="Task type",
     )
     parser.add_argument("--config", required=True, help="Config YAML path")

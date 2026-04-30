@@ -74,7 +74,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--task",
-        choices=["detect", "classify", "segment", "detect_yolo"],
+        choices=[
+            "detect",
+            "classify",
+            "segment",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+        ],
         help="Task type to restore (auto-detected from master_detail if omitted)",
     )
     parser.add_argument(

@@ -37,6 +37,11 @@ Supported tasks:
 - `classify` — image classification (ViT, timm models)
 - `segment` — segmentation (SAM, SAM2)
 - `detect_yolo` — Ultralytics YOLO detection
+- `track_yolo` — Ultralytics detector training (tracking uses inference-time trackers)
+- `segment_yolo` — Ultralytics YOLO segmentation (HF mask column → YOLO labels)
+- `classify_yolo` — Ultralytics YOLO classification
+- `pose_yolo` — Ultralytics YOLO pose (requires `objects["keypoints"]` in HF data)
+- `obb_yolo` — Ultralytics YOLO oriented boxes (5- or 8-value boxes per instance)
 
 Local execution:
 

@@ -16,6 +16,7 @@ TASK_SCRIPTS = {
     "detect": "train_detect.py",
     "classify": "train_classify.py",
     "segment": "train_segment.py",
+    "detect_yolo": "train_detect_yolo.py",
 }
 
 
@@ -32,7 +33,9 @@ def resolve_task_from_config(config_path: Path) -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a vision experiment locally.")
     parser.add_argument(
-        "--task", choices=["detect", "classify", "segment"], help="Task type"
+        "--task",
+        choices=["detect", "classify", "segment", "detect_yolo"],
+        help="Task type",
     )
     parser.add_argument("--config", required=True, help="Config YAML path")
     parser.add_argument("--output", type=Path, help="Write log to this file")

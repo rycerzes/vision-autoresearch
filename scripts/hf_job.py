@@ -34,6 +34,7 @@ TASK_SCRIPTS = {
     "detect": "train_detect.py",
     "classify": "train_classify.py",
     "segment": "train_segment.py",
+    "detect_yolo": "train_detect_yolo.py",
 }
 
 SUMMARY_KEYS = {
@@ -560,7 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="Audit config before launching"
     )
     preflight_p.add_argument(
-        "--task", required=True, choices=["detect", "classify", "segment"]
+        "--task",
+        required=True,
+        choices=["detect", "classify", "segment", "detect_yolo"],
     )
     preflight_p.add_argument(
         "--config", help="Config YAML path (defaults to configs/base_<task>.yaml)"
@@ -570,7 +573,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     launch_p = subparsers.add_parser("launch", help="Bundle and submit an HF Job")
     launch_p.add_argument(
-        "--task", required=True, choices=["detect", "classify", "segment"]
+        "--task",
+        required=True,
+        choices=["detect", "classify", "segment", "detect_yolo"],
     )
     launch_p.add_argument(
         "--config", help="Config YAML path (defaults to configs/base_<task>.yaml)"

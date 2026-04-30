@@ -53,7 +53,7 @@ def restore_config(task_type: str, force: bool = False) -> dict:
     config_path.write_text(config_content, encoding="utf-8")
 
     rows = ensure_results_ledger(task_type)
-    row = current_promoted_row(rows)
+    row = current_promoted_row(rows, task_type=task_type)
     if row:
         snapshot = build_master_snapshot(row)
         write_json(MASTER_PATH, snapshot)
@@ -74,7 +74,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--task",
-        choices=["detect", "classify", "segment"],
+        choices=["detect", "classify", "segment", "detect_yolo"],
         help="Task type to restore (auto-detected from master_detail if omitted)",
     )
     parser.add_argument(

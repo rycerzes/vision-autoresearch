@@ -11,7 +11,7 @@ on a given dataset with disciplined, comparable single-change experiments.
 ## Hard Rules
 
 - Edit config YAMLs only, never training scripts (`train_detect.py`,
-  `train_classify.py`, `train_segment.py`).
+  `train_detect_yolo.py`, `train_classify.py`, `train_segment.py`).
 - Never modify `prepare.py`.
 - Start from the current local promoted master config, not stale local history.
 - Treat `research/live/master.json`, `research/results.tsv`, and the base
@@ -31,6 +31,7 @@ on a given dataset with disciplined, comparable single-change experiments.
 | Task | Training Script | Default Model | Promotion Metric |
 |------|----------------|---------------|-----------------|
 | `detect` | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
+| `detect_yolo` | `train_detect_yolo.py` | `yolo11n.pt` (Ultralytics) | mAP |
 | `classify` | `train_classify.py` | `google/vit-base-patch16-224` | accuracy |
 | `segment` | `train_segment.py` | `facebook/sam2.1-hiera-small` | IoU |
 
@@ -64,7 +65,7 @@ experiments.
 Default benchmark path is Hugging Face Jobs.
 
 Per experiment:
-- `uv run scripts/hf_job.py preflight --task <detect|classify|segment>`
+- `uv run scripts/hf_job.py preflight --task <detect|detect_yolo|classify|segment>`
 - `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 - `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
 - `uv run scripts/parse_metric.py /tmp/vision-run.log`
@@ -94,7 +95,7 @@ For local GPU execution:
 ## Repo Layout
 
 - `configs/` — base and experiment config YAMLs (the experiment surface).
-- `train_detect.py`, `train_classify.py`, `train_segment.py` — stable training
+- `train_detect.py`, `train_detect_yolo.py`, `train_classify.py`, `train_segment.py` — stable training
   scripts (do not edit during experiments).
 - `prepare.py` — dataset validation (never edit).
 - `research/results.tsv` — append-only local run ledger.

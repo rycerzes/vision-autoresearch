@@ -36,7 +36,7 @@ Supported tasks:
 - `detect` — object detection (DETR, D-FINE, RT-DETR, YOLOS)
 - `classify` — image classification (ViT, timm models)
 - `segment` — segmentation (SAM, SAM2)
-- `detect_yolo` — (Phase 7) Ultralytics YOLO models
+- `detect_yolo` — Ultralytics YOLO detection
 
 Local execution:
 

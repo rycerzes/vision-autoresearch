@@ -44,6 +44,7 @@ LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
 
 METRIC_FOR_TASK = {
     "detect": "mAP",
+    "detect_yolo": "mAP",
     "classify": "accuracy",
     "segment": "iou",
 }
@@ -120,7 +121,9 @@ def main() -> int:
     )
     parser.add_argument("--config", type=Path, help="Config YAML used for this run")
     parser.add_argument(
-        "--task", choices=["detect", "classify", "segment"], help="Task type"
+        "--task",
+        choices=["detect", "classify", "segment", "detect_yolo"],
+        help="Task type",
     )
     parser.add_argument("--job-id", help="HF Job ID for this run")
     parser.add_argument(
@@ -165,7 +168,7 @@ def main() -> int:
 
     context = env_context()
     existing_rows = ensure_results_ledger(task_type)
-    current_master = current_master_snapshot(existing_rows)
+    current_master = current_master_snapshot(existing_rows, task_type=task_type)
 
     candidate_value = parse_float(metrics.get(promotion_metric))
     if current_master:
@@ -196,7 +199,9 @@ def main() -> int:
         "experiment_id": context.get("experiment_id", ""),
         "worker_id": context.get("worker_id", ""),
         "hypothesis": context.get("hypothesis", args.comment),
-        "model_name": config_data.get("model_name", ""),
+        "model_name": (
+            config_data.get("model_name") or config_data.get("model_name_or_path", "")
+        ),
         "dataset_name": config_data.get("dataset_name", ""),
         "config_hash": c_hash,
         "parent_hash": current_master.get("hash", "") if current_master else "",

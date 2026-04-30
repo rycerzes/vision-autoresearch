@@ -8,6 +8,20 @@ Supported ``task_type`` values (promotion metric in parentheses):
 
 ``track_yolo`` trains a detector (Ultralytics has no ``train`` mode for tracking);
 use the same detection dataset contract; tracking inference is separate.
+
+Ultralytics hyperparameters
+  Top-level YAML key ``ultralytics_train`` (mapping) is passed to ``YOLO.train()``,
+  merged with Ultralytics defaults. Keys not listed there are filled from
+  ``TrainingArguments`` / ``YoloDataArguments`` where they overlap Ultralytics names:
+  ``epochs`` ← ``num_train_epochs``, ``batch`` ← ``per_device_train_batch_size``,
+  ``imgsz`` ← ``image_square_size``, ``workers`` ← ``dataloader_num_workers``,
+  ``seed``, ``amp`` ← ``fp16``. The Hugging Face-only fields ``learning_rate``,
+  ``weight_decay``, ``warmup_steps``, ``lr_scheduler_type``, and
+  ``gradient_accumulation_steps`` do **not** affect YOLO training unless you set the
+  Ultralytics equivalents inside ``ultralytics_train`` (e.g. ``lr0``, ``weight_decay``,
+  ``warmup_epochs``, ``cos_lr``). Script-owned keys ``data``, ``project``, ``name``,
+  and ``exist_ok`` are always set by this script (values under ``ultralytics_train``
+  for those keys are ignored). Reference: https://docs.ultralytics.com/modes/train/
 """
 
 from __future__ import annotations
@@ -34,8 +48,69 @@ from transformers import HfArgumentParser, TrainingArguments
 import trackio
 from train_detect import ModelArguments, detect_bbox_format_from_samples, sanitize_dataset
 from ultralytics import YOLO
+from ultralytics.cfg import DEFAULT_CFG
 
 logger = logging.getLogger(__name__)
+
+# Keys Ultralytics documents for training; used only to warn on likely typos.
+_KNOWN_ULTRATRAIN_KEYS = frozenset(vars(DEFAULT_CFG).keys())
+
+# Always set by this bridge (HF ``output_dir`` / exported dataset).
+_RESERVED_ULTRATRAIN_KEYS = frozenset({"data", "project", "name", "exist_ok"})
+
+
+def _coerce_ultralytics_train_block(raw: Any, config_path: Path) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{config_path}: ultralytics_train must be a mapping, got {type(raw).__name__}")
+    return {str(k): v for k, v in raw.items()}
+
+
+def _warn_unknown_ultralytics_keys(user_keys: set[str]) -> None:
+    unknown = sorted(user_keys - _KNOWN_ULTRATRAIN_KEYS)
+    if unknown and logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "ultralytics_train keys not in Ultralytics DEFAULT_CFG (may still be valid): %s",
+            unknown,
+        )
+
+
+def build_ultralytics_train_kwargs(
+    *,
+    data_yaml: Path,
+    out_root: Path,
+    training_args: TrainingArguments,
+    data_args: YoloDataArguments,
+    ultralytics_train: dict[str, Any],
+) -> dict[str, Any]:
+    """Build kwargs for ``YOLO.train()`` from YAML ``ultralytics_train`` plus HF fallbacks."""
+    merged: dict[str, Any] = dict(ultralytics_train)
+    collisions = _RESERVED_ULTRATRAIN_KEYS & merged.keys()
+    if collisions:
+        logger.info("ultralytics_train: ignoring script-owned keys %s", sorted(collisions))
+
+    _warn_unknown_ultralytics_keys(set(merged.keys()))
+
+    defaults_from_hf = {
+        "epochs": int(training_args.num_train_epochs),
+        "batch": int(training_args.per_device_train_batch_size),
+        "imgsz": int(data_args.image_square_size),
+        "workers": int(training_args.dataloader_num_workers),
+        "seed": int(training_args.seed),
+        "amp": bool(training_args.fp16),
+    }
+    for key, value in defaults_from_hf.items():
+        if key not in merged:
+            merged[key] = value
+
+    merged["data"] = str(data_yaml)
+    merged["project"] = str(out_root)
+    merged["name"] = "ultralytics"
+    merged["exist_ok"] = True
+    merged.setdefault("verbose", True)
+
+    return merged
 
 LEDGER_TASKS = frozenset(
     {
@@ -573,25 +648,21 @@ def train_loop(
     data_args: YoloDataArguments,
     metrics_reader: Callable[[Path], dict[str, float]],
     start_time: float,
+    ultralytics_train: dict[str, Any],
 ) -> None:
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
     out_root = Path(training_args.output_dir).resolve()
-    model = YOLO(model_path)
-    model.train(
-        data=str(data_yaml),
-        epochs=int(training_args.num_train_epochs),
-        imgsz=int(data_args.image_square_size),
-        batch=int(training_args.per_device_train_batch_size),
-        workers=int(training_args.dataloader_num_workers),
-        project=str(out_root),
-        name="ultralytics",
-        exist_ok=True,
-        seed=int(training_args.seed),
-        verbose=True,
-        amp=bool(training_args.fp16),
+    train_kwargs = build_ultralytics_train_kwargs(
+        data_yaml=data_yaml,
+        out_root=out_root,
+        training_args=training_args,
+        data_args=data_args,
+        ultralytics_train=ultralytics_train,
     )
+    model = YOLO(model_path)
+    model.train(**train_kwargs)
 
     trainer = getattr(model, "trainer", None)
     save_dir = getattr(trainer, "save_dir", None) if trainer is not None else None
@@ -614,6 +685,7 @@ def run_detect_family(
     training_args: TrainingArguments,
     line_builder: Callable[[dict[str, Any], int, int], list[str]],
     start_time: float,
+    ultralytics_train: dict[str, Any],
 ) -> None:
     dataset, id2label = prepare_detection_like_dataset(model_args, data_args, training_args)
     if ledger_task == "pose_yolo":
@@ -647,6 +719,7 @@ def run_detect_family(
         data_args,
         read_detect_metrics,
         start_time,
+        ultralytics_train,
     )
 
 
@@ -655,6 +728,7 @@ def run_segment_yolo(
     data_args: YoloDataArguments,
     training_args: TrainingArguments,
     start_time: float,
+    ultralytics_train: dict[str, Any],
 ) -> None:
     dataset = load_dataset(
         data_args.dataset_name,
@@ -725,6 +799,7 @@ def run_segment_yolo(
         data_args,
         read_segment_metrics,
         start_time,
+        ultralytics_train,
     )
 
 
@@ -733,6 +808,7 @@ def run_classify_yolo(
     data_args: YoloDataArguments,
     training_args: TrainingArguments,
     start_time: float,
+    ultralytics_train: dict[str, Any],
 ) -> None:
     dataset, id2label, cls_key = prepare_classify_dataset(model_args, data_args, training_args)
     val_key = "validation" if "validation" in dataset else "test"
@@ -751,6 +827,7 @@ def run_classify_yolo(
         data_args,
         read_classify_metrics,
         start_time,
+        ultralytics_train,
     )
 
 
@@ -769,6 +846,8 @@ def main() -> None:
         raise SystemExit(
             f"task_type must be one of {sorted(LEDGER_TASKS)}; got {ledger_task!r}"
         )
+
+    ultralytics_train = _coerce_ultralytics_train_block(raw_cfg.get("ultralytics_train"), cfg_path)
 
     parser = HfArgumentParser((ModelArguments, YoloDataArguments, TrainingArguments))
     if cfg_path.suffix.lower() in {".yaml", ".yml"}:
@@ -795,15 +874,21 @@ def main() -> None:
     trackio.init(project=training_args.output_dir, name=training_args.run_name)
 
     if ledger_task in ("detect_yolo", "track_yolo"):
-        run_detect_family(ledger_task, model_args, data_args, training_args, detect_label_lines, start_time)
+        run_detect_family(
+            ledger_task, model_args, data_args, training_args, detect_label_lines, start_time, ultralytics_train
+        )
     elif ledger_task == "pose_yolo":
-        run_detect_family(ledger_task, model_args, data_args, training_args, pose_label_lines, start_time)
+        run_detect_family(
+            ledger_task, model_args, data_args, training_args, pose_label_lines, start_time, ultralytics_train
+        )
     elif ledger_task == "obb_yolo":
-        run_detect_family(ledger_task, model_args, data_args, training_args, obb_label_lines, start_time)
+        run_detect_family(
+            ledger_task, model_args, data_args, training_args, obb_label_lines, start_time, ultralytics_train
+        )
     elif ledger_task == "segment_yolo":
-        run_segment_yolo(model_args, data_args, training_args, start_time)
+        run_segment_yolo(model_args, data_args, training_args, start_time, ultralytics_train)
     elif ledger_task == "classify_yolo":
-        run_classify_yolo(model_args, data_args, training_args, start_time)
+        run_classify_yolo(model_args, data_args, training_args, start_time, ultralytics_train)
     else:
         raise SystemExit(f"Unhandled task_type: {ledger_task}")
 

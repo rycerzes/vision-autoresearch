@@ -54,6 +54,18 @@ such as:
 - `freeze_backbone`, `prompt_type`, `loss_type`
 - `num_train_epochs`
 
+For **YOLO-family tasks** (`*_yolo`), Ultralytics is the trainer. Use the
+top-level YAML mapping `ultralytics_train` to pass
+[Ultralytics `train` settings](https://docs.ultralytics.com/modes/train/)
+(`lr0`, `weight_decay`, `warmup_epochs`, `cos_lr`, `mosaic`, `patience`,
+`device`, …). Keys omitted there still default from `num_train_epochs` →
+`epochs`, `per_device_train_batch_size` → `batch`, `image_square_size` →
+`imgsz`, `dataloader_num_workers` → `workers`, `seed`, and `fp16` → `amp`.
+Hugging Face-only fields such as `learning_rate`, `lr_scheduler_type`,
+`warmup_steps`, and `gradient_accumulation_steps` do not affect YOLO unless you
+mirror them under `ultralytics_train`. Keys `data`, `project`, `name`, and
+`exist_ok` are always set by `train_ultralytics.py`.
+
 Training scripts are stable infrastructure and should not change between
 experiments.
 

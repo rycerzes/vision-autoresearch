@@ -11,7 +11,8 @@ on a given dataset with disciplined, comparable single-change experiments.
 ## Hard Rules
 
 - Edit config YAMLs only, never training scripts (`train_detect.py`,
-  `train_classify.py`, `train_segment.py`).
+  `train_ultralytics.py`, `train_classify.py`, `train_segment.py`).
+  (`train_detect_yolo.py` is a thin compatibility shim; do not edit it.)
 - Never modify `prepare.py`.
 - Start from the current local promoted master config, not stale local history.
 - Treat `research/live/master.json`, `research/results.tsv`, and the base
@@ -31,6 +32,12 @@ on a given dataset with disciplined, comparable single-change experiments.
 | Task | Training Script | Default Model | Promotion Metric |
 |------|----------------|---------------|-----------------|
 | `detect` | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
+| `detect_yolo` | `train_ultralytics.py` (via `train_detect_yolo.py`) | `yolo26n.pt` (Ultralytics) | mAP |
+| `track_yolo` | `train_ultralytics.py` | `yolo26n.pt` | mAP (detector training for tracking) |
+| `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | IoU (mask mAP proxy) |
+| `classify_yolo` | `train_ultralytics.py` | `yolo26n-cls.pt` | accuracy |
+| `pose_yolo` | `train_ultralytics.py` | `yolo26n-pose.pt` | mAP |
+| `obb_yolo` | `train_ultralytics.py` | `yolo26n-obb.pt` | mAP |
 | `classify` | `train_classify.py` | `google/vit-base-patch16-224` | accuracy |
 | `segment` | `train_segment.py` | `facebook/sam2.1-hiera-small` | IoU |
 
@@ -46,6 +53,28 @@ such as:
 - `image_size`, `use_albumentations`, `use_trivial_augment`
 - `freeze_backbone`, `prompt_type`, `loss_type`
 - `num_train_epochs`
+
+For **YOLO-family tasks** (`*_yolo`), Ultralytics is the trainer. Use the
+top-level YAML mapping `ultralytics_train` to pass
+[Ultralytics `train` settings](https://docs.ultralytics.com/modes/train/)
+(`lr0`, `weight_decay`, `warmup_epochs`, `cos_lr`, `mosaic`, `patience`,
+`device`, …). Keys omitted there still default from `num_train_epochs` →
+`epochs`, `per_device_train_batch_size` → `batch`, `image_square_size` →
+`imgsz`, `dataloader_num_workers` → `workers`, `seed`, and `fp16` → `amp`.
+Hugging Face-only fields such as `learning_rate`, `lr_scheduler_type`,
+`warmup_steps`, and `gradient_accumulation_steps` do not affect YOLO unless you
+mirror them under `ultralytics_train`. Keys `data`, `project`, `name`, and
+`exist_ok` are always set by `train_ultralytics.py`.
+
+Optional **`ultralytics_bridge`** (YAML mapping) controls Ultralytics entry points
+for YOLO-World, YOLOE, RT-DETR, and YOLOE fine-tune vs linear-probe trainers; see
+the module docstring in `train_ultralytics.py` and
+https://docs.ultralytics.com/models/yoloe/ ,
+https://docs.ultralytics.com/models/yolo-world/ .
+Optional string **`ultralytics_train.trainer`** selects a trainer class by name
+(e.g. `YOLOEPESegTrainer`, `WorldTrainer`). **YOLO-NAS** weights cannot be trained
+here (Ultralytics documents val/predict/export only); the script exits with a
+clear error if a NAS checkpoint is used for `*_yolo` training.
 
 Training scripts are stable infrastructure and should not change between
 experiments.
@@ -64,7 +93,7 @@ experiments.
 Default benchmark path is Hugging Face Jobs.
 
 Per experiment:
-- `uv run scripts/hf_job.py preflight --task <detect|classify|segment>`
+- `uv run scripts/hf_job.py preflight --task <detect|detect_yolo|track_yolo|segment_yolo|classify_yolo|pose_yolo|obb_yolo|classify|segment>`
 - `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 - `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
 - `uv run scripts/parse_metric.py /tmp/vision-run.log`
@@ -94,8 +123,8 @@ For local GPU execution:
 ## Repo Layout
 
 - `configs/` — base and experiment config YAMLs (the experiment surface).
-- `train_detect.py`, `train_classify.py`, `train_segment.py` — stable training
-  scripts (do not edit during experiments).
+- `train_detect.py`, `train_ultralytics.py`, `train_detect_yolo.py` (shim),
+  `train_classify.py`, `train_segment.py` — stable training scripts (do not edit during experiments).
 - `prepare.py` — dataset validation (never edit).
 - `research/results.tsv` — append-only local run ledger.
 - `research/live/` — current local promoted master and DAG.

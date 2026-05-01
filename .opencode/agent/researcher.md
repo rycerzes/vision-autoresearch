@@ -19,7 +19,7 @@ Read before proposing work:
 - `research/live/master.json`
 - `research/live/dag.json`
 
-Supported tasks: detect (mAP), classify (accuracy), segment (IoU).
+Supported tasks: detect (mAP), detect_yolo (mAP), classify (accuracy), segment (IoU).
 
 Rules:
 

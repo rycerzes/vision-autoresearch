@@ -242,8 +242,13 @@ def ensure_results_ledger(task_type: str = "detect") -> list[dict[str, str]]:
     return [normalize_row(seeded)]
 
 
-def current_promoted_row(rows: list[dict[str, str]] | None = None) -> dict[str, str] | None:
+def current_promoted_row(
+    rows: list[dict[str, str]] | None = None,
+    task_type: str | None = None,
+) -> dict[str, str] | None:
     promoted = promoted_rows(rows)
+    if task_type:
+        promoted = [row for row in promoted if row.get("task_type") == task_type]
     if not promoted:
         return None
     return promoted[-1]
@@ -289,8 +294,11 @@ def build_master_snapshot(row: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def current_master_snapshot(rows: list[dict[str, str]] | None = None) -> dict[str, Any] | None:
-    row = current_promoted_row(rows)
+def current_master_snapshot(
+    rows: list[dict[str, str]] | None = None,
+    task_type: str | None = None,
+) -> dict[str, Any] | None:
+    row = current_promoted_row(rows, task_type=task_type)
     if row is None:
         return None
     return build_master_snapshot(row)

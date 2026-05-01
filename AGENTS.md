@@ -66,6 +66,11 @@ Hugging Face-only fields such as `learning_rate`, `lr_scheduler_type`,
 mirror them under `ultralytics_train`. Keys `data`, `project`, `name`, and
 `exist_ok` are always set by `train_ultralytics.py`.
 
+For detection-like `*_yolo` tasks, optional **`objects_category_field`** (`auto`
+or `category` / `label` / `categories`) selects which `objects` sub-field holds
+class ids or names when datasets use `label` instead of `category` (same
+alternatives as `prepare.py`).
+
 Optional **`ultralytics_bridge`** (YAML mapping) controls Ultralytics entry points
 for YOLO-World, YOLOE, RT-DETR, and YOLOE fine-tune vs linear-probe trainers; see
 the module docstring in `train_ultralytics.py` and

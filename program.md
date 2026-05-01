@@ -36,7 +36,7 @@ Supported tasks:
 - `detect` — object detection (DETR, D-FINE, RT-DETR, YOLOS)
 - `classify` — image classification (ViT, timm models)
 - `segment` — segmentation (SAM, SAM2)
-- `detect_yolo` — Ultralytics YOLO detection
+- `detect_yolo` — Ultralytics YOLO detection (includes YOLO-World / RT-DETR via `YOLO()`, YOLOE via bridge; YOLO-NAS is not trainable in Ultralytics)
 - `track_yolo` — Ultralytics detector training (tracking uses inference-time trackers)
 - `segment_yolo` — Ultralytics YOLO segmentation (HF mask column → YOLO labels)
 - `classify_yolo` — Ultralytics YOLO classification

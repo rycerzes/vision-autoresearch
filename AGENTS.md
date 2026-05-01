@@ -66,6 +66,16 @@ Hugging Face-only fields such as `learning_rate`, `lr_scheduler_type`,
 mirror them under `ultralytics_train`. Keys `data`, `project`, `name`, and
 `exist_ok` are always set by `train_ultralytics.py`.
 
+Optional **`ultralytics_bridge`** (YAML mapping) controls Ultralytics entry points
+for YOLO-World, YOLOE, RT-DETR, and YOLOE fine-tune vs linear-probe trainers; see
+the module docstring in `train_ultralytics.py` and
+https://docs.ultralytics.com/models/yoloe/ ,
+https://docs.ultralytics.com/models/yolo-world/ .
+Optional string **`ultralytics_train.trainer`** selects a trainer class by name
+(e.g. `YOLOEPESegTrainer`, `WorldTrainer`). **YOLO-NAS** weights cannot be trained
+here (Ultralytics documents val/predict/export only); the script exits with a
+clear error if a NAS checkpoint is used for `*_yolo` training.
+
 Training scripts are stable infrastructure and should not change between
 experiments.
 

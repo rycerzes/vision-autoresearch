@@ -4,8 +4,16 @@
 task_type: detect_yolo
 backend: ultralytics
 
-# Model (Ultralytics checkpoint name or path, e.g. yolo26n.pt)
+# Model (Ultralytics checkpoint name or path, e.g. yolo26n.pt, yolov8s-world.pt, yoloe-26s-seg.pt, rtdetr-l.pt)
 model_name_or_path: yolo26n.pt
+
+# Optional: bridge for YOLO-World / YOLOE / RT-DETR / trainer overrides (see train_ultralytics.py docstring).
+# ultralytics_bridge:
+#   model_class: auto   # auto | yolo | yoloe | yolo_world | rtdetr
+#   yoloe_training: full   # auto | full | linear_probe (maps to YOLOE* vs YOLOEPE* trainers)
+#   yoloe_pretrained_weights: null   # optional path for .train(pretrained=...) when using YAML+weights flows
+#   trainer: null   # optional trainer class name; overrides yoloe_training when set
+#   sync_class_names: true   # YOLO-World / YOLOE: call set_classes from dataset names
 
 # Dataset (HF Hub — same detection schema as task `detect`)
 dataset_name: cppe-5

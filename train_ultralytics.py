@@ -10,23 +10,47 @@ Supported ``task_type`` values (promotion metric in parentheses):
 use the same detection dataset contract; tracking inference is separate.
 
 Ultralytics hyperparameters
-  Top-level YAML key ``ultralytics_train`` (mapping) is passed to ``YOLO.train()``,
-  merged with Ultralytics defaults. Keys not listed there are filled from
-  ``TrainingArguments`` / ``YoloDataArguments`` where they overlap Ultralytics names:
-  ``epochs`` ← ``num_train_epochs``, ``batch`` ← ``per_device_train_batch_size``,
-  ``imgsz`` ← ``image_square_size``, ``workers`` ← ``dataloader_num_workers``,
-  ``seed``, ``amp`` ← ``fp16``. The Hugging Face-only fields ``learning_rate``,
-  ``weight_decay``, ``warmup_steps``, ``lr_scheduler_type``, and
-  ``gradient_accumulation_steps`` do **not** affect YOLO training unless you set the
-  Ultralytics equivalents inside ``ultralytics_train`` (e.g. ``lr0``, ``weight_decay``,
-  ``warmup_epochs``, ``cos_lr``). Script-owned keys ``data``, ``project``, ``name``,
-  and ``exist_ok`` are always set by this script (values under ``ultralytics_train``
-  for those keys are ignored). Reference: https://docs.ultralytics.com/modes/train/
+  Top-level YAML key ``ultralytics_train`` (mapping) is passed to the model's
+  ``.train()`` method, merged with Ultralytics defaults. Keys not listed there are
+  filled from ``TrainingArguments`` / ``YoloDataArguments`` where they overlap
+  Ultralytics names: ``epochs`` ← ``num_train_epochs``,
+  ``batch`` ← ``per_device_train_batch_size``, ``imgsz`` ← ``image_square_size``,
+  ``workers`` ← ``dataloader_num_workers``, ``seed``, ``amp`` ← ``fp16``.
+  HF-only fields do **not** affect training unless mirrored under ``ultralytics_train``
+  (e.g. ``lr0``, ``weight_decay``, ``warmup_epochs``, ``cos_lr``).
+  Script-owned keys ``data``, ``project``, ``name``, and ``exist_ok`` are always set
+  (values under ``ultralytics_train`` for those keys are ignored).
+
+  Optional string key ``ultralytics_train.trainer`` names a trainer class (e.g.
+  ``YOLOEPESegTrainer``, ``WorldTrainer``); see Ultralytics docs for YOLOE / YOLO-World.
+
+Ultralytics bridge (optional top-level YAML ``ultralytics_bridge``)
+  ``model_class`` (``auto`` | ``yolo`` | ``yoloe`` | ``yolo_world`` | ``rtdetr``):
+    Which Ultralytics entry type loads ``model_name_or_path``. ``auto`` uses
+    ``YOLO(...)``, which switches to YOLOWorld / YOLOE / RT-DETR when the weight
+    stem matches Ultralytics conventions.
+  ``yoloe_training`` (``auto`` | ``full`` | ``linear_probe``): when training YOLOE
+    and ``trainer`` is unset, selects ``YOLOE*Trainer`` vs ``YOLOEPE*Trainer``
+    (PE = linear probing in Ultralytics). ``auto`` defaults to ``full``.
+  ``yoloe_pretrained_weights``: optional path passed as ``pretrained=`` to
+    ``.train()`` (required for some YOLO-from-YAML + seg-weights flows; see
+    https://docs.ultralytics.com/models/yoloe/ ).
+  ``sync_class_names`` (default ``true``): for YOLO-World / YOLOE, call
+    ``set_classes`` with names from the exported dataset.
+
+YOLO-NAS: Ultralytics documents **no training** for NAS weights (val / predict /
+export only). This script aborts with a clear error if a NAS checkpoint is used
+for a training task. See https://docs.ultralytics.com/models/yolo-nas/
+
+References: https://docs.ultralytics.com/modes/train/
+  https://docs.ultralytics.com/models/yoloe/
+  https://docs.ultralytics.com/models/yolo-world/
 """
 
 from __future__ import annotations
 
 import csv
+import inspect
 import logging
 import math
 import os
@@ -36,7 +60,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Type
 
 import numpy as np
 import torch
@@ -49,6 +73,7 @@ import trackio
 from train_detect import ModelArguments, detect_bbox_format_from_samples, sanitize_dataset
 from ultralytics import YOLO
 from ultralytics.cfg import DEFAULT_CFG
+from ultralytics.models.yolo.model import YOLOE, YOLOWorld
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +82,158 @@ _KNOWN_ULTRATRAIN_KEYS = frozenset(vars(DEFAULT_CFG).keys())
 
 # Always set by this bridge (HF ``output_dir`` / exported dataset).
 _RESERVED_ULTRATRAIN_KEYS = frozenset({"data", "project", "name", "exist_ok"})
+
+# Optional YAML: ultralytics_bridge (see module docstring).
+_TRAINER_REGISTRY: dict[str, Type[Any]] | None = None
+
+
+def _coerce_ultralytics_bridge(raw: Any, config_path: Path) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{config_path}: ultralytics_bridge must be a mapping, got {type(raw).__name__}")
+    return {str(k): v for k, v in raw.items()}
+
+
+def _stem_lower(model_path: str) -> str:
+    return Path(str(model_path)).stem.lower()
+
+
+def _looks_like_yolo_nas_weights(model_path: str) -> bool:
+    s = _stem_lower(model_path)
+    return "yolo_nas" in s or s.startswith("yolonas")
+
+
+def _trainer_name_registry() -> dict[str, Type[Any]]:
+    """Map YAML ``trainer`` string → class. Lazily populated for optional Ultralytics extras."""
+    global _TRAINER_REGISTRY
+    if _TRAINER_REGISTRY is not None:
+        return _TRAINER_REGISTRY
+    reg: dict[str, Type[Any]] = {}
+    try:
+        from ultralytics.models.yolo.world.train import WorldTrainer
+
+        reg["WorldTrainer"] = WorldTrainer
+    except ImportError:
+        pass
+    try:
+        from ultralytics.models.yolo import yoloe as _yoloe_mod
+
+        for _name in (
+            "YOLOEPETrainer",
+            "YOLOEPESegTrainer",
+            "YOLOETrainer",
+            "YOLOESegTrainer",
+            "YOLOETrainerFromScratch",
+            "YOLOESegTrainerFromScratch",
+            "YOLOEPEFreeTrainer",
+            "YOLOEVPTrainer",
+            "YOLOESegVPTrainer",
+        ):
+            if hasattr(_yoloe_mod, _name):
+                reg[_name] = getattr(_yoloe_mod, _name)
+    except ImportError:
+        pass
+    _TRAINER_REGISTRY = reg
+    return reg
+
+
+def _resolve_trainer_class(name: str) -> Type[Any]:
+    reg = _trainer_name_registry()
+    key = str(name).strip()
+    if key in reg:
+        return reg[key]
+    raise SystemExit(
+        f"Unknown ultralytics_train.trainer / ultralytics_bridge.trainer {key!r}. "
+        f"Known names: {sorted(reg)}"
+    )
+
+
+def _yoloe_task_for_ledger(ledger_task: str) -> str:
+    if ledger_task == "segment_yolo":
+        return "segment"
+    return "detect"
+
+
+def load_ultralytics_model(model_path: str, ledger_task: str, bridge: dict[str, Any]) -> Any:
+    """Construct the Ultralytics model object per ``ultralytics_bridge.model_class``."""
+    if _looks_like_yolo_nas_weights(model_path):
+        raise SystemExit(
+            "YOLO-NAS checkpoints cannot be trained in Ultralytics (inference / val / export only). "
+            "Use a standard YOLO or YOLOE weight for training, or run val/predict outside this benchmark. "
+            "See https://docs.ultralytics.com/models/yolo-nas/"
+        )
+    raw_mc = bridge.get("model_class", "auto")
+    mc = str(raw_mc).strip().lower() if raw_mc is not None else "auto"
+    if mc in ("auto", "", "yolo"):
+        return YOLO(model_path)
+    if mc == "yoloe":
+        return YOLOE(model_path, task=_yoloe_task_for_ledger(ledger_task))
+    if mc in ("yolo_world", "yoloworld", "world"):
+        return YOLOWorld(model_path)
+    if mc in ("rtdetr", "rt-detr", "rt_detr"):
+        from ultralytics import RTDETR
+
+        return RTDETR(model_path)
+    raise SystemExit(
+        f"ultralytics_bridge.model_class must be one of auto, yolo, yoloe, yolo_world, rtdetr; got {raw_mc!r}"
+    )
+
+
+def _maybe_sync_open_vocab_class_names(model: Any, ordered_names: list[str], bridge: dict[str, Any]) -> None:
+    if not ordered_names:
+        return
+    sync = bridge.get("sync_class_names", True)
+    if sync is False or str(sync).lower() in {"0", "false", "no"}:
+        return
+    if isinstance(model, YOLOWorld):
+        model.set_classes(ordered_names)
+        logger.info("YOLO-World: set_classes(%d names) from dataset", len(ordered_names))
+        return
+    if isinstance(model, YOLOE):
+        try:
+            model.set_classes(ordered_names)
+            logger.info("YOLOE: set_classes(%d names) from dataset", len(ordered_names))
+        except Exception as exc:
+            logger.warning("YOLOE set_classes skipped: %s", exc)
+
+
+def _resolve_trainer_for_yoloe(ledger_task: str, mode: str) -> Type[Any] | None:
+    """Pick default YOLOE trainer when ``yoloe_training`` is full vs linear_probe (Ultralytics PE trainers)."""
+    mode = (mode or "auto").strip().lower()
+    if mode == "auto":
+        mode = "full"
+    reg = _trainer_name_registry()
+    if ledger_task == "segment_yolo":
+        if mode == "linear_probe":
+            return reg.get("YOLOEPESegTrainer")
+        if mode == "full":
+            return reg.get("YOLOESegTrainer")
+        raise SystemExit(f"yoloe_training must be auto, full, or linear_probe; got {mode!r}")
+    if ledger_task in ("detect_yolo", "track_yolo", "pose_yolo", "obb_yolo"):
+        if mode == "linear_probe":
+            return reg.get("YOLOEPETrainer")
+        if mode == "full":
+            return reg.get("YOLOETrainer")
+        raise SystemExit(f"yoloe_training must be auto, full, or linear_probe; got {mode!r}")
+    return None
+
+
+def _pick_trainer_class(
+    model: Any,
+    ledger_task: str,
+    bridge: dict[str, Any],
+    explicit_trainer: Type[Any] | None,
+    bridge_trainer_name: str | None,
+) -> Type[Any] | None:
+    if explicit_trainer is not None:
+        return explicit_trainer
+    if bridge_trainer_name:
+        return _resolve_trainer_class(bridge_trainer_name)
+    if isinstance(model, YOLOE):
+        y_mode = bridge.get("yoloe_training", "auto")
+        return _resolve_trainer_for_yoloe(ledger_task, str(y_mode))
+    return None
 
 
 def _coerce_ultralytics_train_block(raw: Any, config_path: Path) -> dict[str, Any]:
@@ -83,14 +260,28 @@ def build_ultralytics_train_kwargs(
     training_args: TrainingArguments,
     data_args: YoloDataArguments,
     ultralytics_train: dict[str, Any],
-) -> dict[str, Any]:
-    """Build kwargs for ``YOLO.train()`` from YAML ``ultralytics_train`` plus HF fallbacks."""
+    bridge: dict[str, Any],
+) -> tuple[dict[str, Any], Type[Any] | None]:
+    """Build kwargs for ``model.train()``; returns ``(train_kwargs, explicit_trainer_class)``."""
     merged: dict[str, Any] = dict(ultralytics_train)
+    trainer_spec = merged.pop("trainer", None)
+    explicit_trainer: Type[Any] | None = None
+    if isinstance(trainer_spec, str) and trainer_spec.strip():
+        explicit_trainer = _resolve_trainer_class(trainer_spec.strip())
+    elif inspect.isclass(trainer_spec):
+        explicit_trainer = trainer_spec
+
     collisions = _RESERVED_ULTRATRAIN_KEYS & merged.keys()
     if collisions:
         logger.info("ultralytics_train: ignoring script-owned keys %s", sorted(collisions))
+    for k in _RESERVED_ULTRATRAIN_KEYS:
+        merged.pop(k, None)
 
     _warn_unknown_ultralytics_keys(set(merged.keys()))
+
+    yp = bridge.get("yoloe_pretrained_weights")
+    if yp is not None and str(yp).strip():
+        merged["pretrained"] = str(yp)
 
     defaults_from_hf = {
         "epochs": int(training_args.num_train_epochs),
@@ -110,7 +301,7 @@ def build_ultralytics_train_kwargs(
     merged["exist_ok"] = True
     merged.setdefault("verbose", True)
 
-    return merged
+    return merged, explicit_trainer
 
 LEDGER_TASKS = frozenset(
     {
@@ -640,6 +831,11 @@ def write_yolo_cls_yaml(root: Path, id2label: dict[int, str]) -> Path:
     return path
 
 
+def ordered_class_names_from_id2label(id2label: dict[int, str]) -> list[str]:
+    """Stable class-name list aligned with YOLO class indices."""
+    return [id2label[i] for i in sorted(id2label.keys())]
+
+
 def train_loop(
     model_path: str,
     data_yaml: Path,
@@ -649,20 +845,41 @@ def train_loop(
     metrics_reader: Callable[[Path], dict[str, float]],
     start_time: float,
     ultralytics_train: dict[str, Any],
+    bridge: dict[str, Any],
+    ordered_class_names: Optional[list[str]] = None,
 ) -> None:
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
     out_root = Path(training_args.output_dir).resolve()
-    train_kwargs = build_ultralytics_train_kwargs(
+    train_kwargs, explicit_trainer = build_ultralytics_train_kwargs(
         data_yaml=data_yaml,
         out_root=out_root,
         training_args=training_args,
         data_args=data_args,
         ultralytics_train=ultralytics_train,
+        bridge=bridge,
     )
-    model = YOLO(model_path)
-    model.train(**train_kwargs)
+    model = load_ultralytics_model(model_path, ledger_task, bridge)
+    if ordered_class_names:
+        _maybe_sync_open_vocab_class_names(model, ordered_class_names, bridge)
+
+    bridge_trainer_name = bridge.get("trainer")
+    bridge_trainer_str = str(bridge_trainer_name).strip() if bridge_trainer_name else None
+    trainer_cls = _pick_trainer_class(
+        model,
+        ledger_task,
+        bridge,
+        explicit_trainer,
+        bridge_trainer_str,
+    )
+    if trainer_cls is not None:
+        logger.info("Using Ultralytics trainer %s", trainer_cls.__name__)
+
+    if trainer_cls is not None:
+        model.train(trainer=trainer_cls, **train_kwargs)
+    else:
+        model.train(**train_kwargs)
 
     trainer = getattr(model, "trainer", None)
     save_dir = getattr(trainer, "save_dir", None) if trainer is not None else None
@@ -686,6 +903,7 @@ def run_detect_family(
     line_builder: Callable[[dict[str, Any], int, int], list[str]],
     start_time: float,
     ultralytics_train: dict[str, Any],
+    bridge: dict[str, Any],
 ) -> None:
     dataset, id2label = prepare_detection_like_dataset(model_args, data_args, training_args)
     if ledger_task == "pose_yolo":
@@ -720,6 +938,8 @@ def run_detect_family(
         read_detect_metrics,
         start_time,
         ultralytics_train,
+        bridge,
+        ordered_class_names=ordered_class_names_from_id2label(id2label),
     )
 
 
@@ -729,6 +949,7 @@ def run_segment_yolo(
     training_args: TrainingArguments,
     start_time: float,
     ultralytics_train: dict[str, Any],
+    bridge: dict[str, Any],
 ) -> None:
     dataset = load_dataset(
         data_args.dataset_name,
@@ -800,6 +1021,8 @@ def run_segment_yolo(
         read_segment_metrics,
         start_time,
         ultralytics_train,
+        bridge,
+        ordered_class_names=ordered_class_names_from_id2label(id2label),
     )
 
 
@@ -809,6 +1032,7 @@ def run_classify_yolo(
     training_args: TrainingArguments,
     start_time: float,
     ultralytics_train: dict[str, Any],
+    bridge: dict[str, Any],
 ) -> None:
     dataset, id2label, cls_key = prepare_classify_dataset(model_args, data_args, training_args)
     val_key = "validation" if "validation" in dataset else "test"
@@ -828,6 +1052,8 @@ def run_classify_yolo(
         read_classify_metrics,
         start_time,
         ultralytics_train,
+        bridge,
+        ordered_class_names=ordered_class_names_from_id2label(id2label),
     )
 
 
@@ -848,6 +1074,7 @@ def main() -> None:
         )
 
     ultralytics_train = _coerce_ultralytics_train_block(raw_cfg.get("ultralytics_train"), cfg_path)
+    bridge = _coerce_ultralytics_bridge(raw_cfg.get("ultralytics_bridge"), cfg_path)
 
     parser = HfArgumentParser((ModelArguments, YoloDataArguments, TrainingArguments))
     if cfg_path.suffix.lower() in {".yaml", ".yml"}:
@@ -875,20 +1102,41 @@ def main() -> None:
 
     if ledger_task in ("detect_yolo", "track_yolo"):
         run_detect_family(
-            ledger_task, model_args, data_args, training_args, detect_label_lines, start_time, ultralytics_train
+            ledger_task,
+            model_args,
+            data_args,
+            training_args,
+            detect_label_lines,
+            start_time,
+            ultralytics_train,
+            bridge,
         )
     elif ledger_task == "pose_yolo":
         run_detect_family(
-            ledger_task, model_args, data_args, training_args, pose_label_lines, start_time, ultralytics_train
+            ledger_task,
+            model_args,
+            data_args,
+            training_args,
+            pose_label_lines,
+            start_time,
+            ultralytics_train,
+            bridge,
         )
     elif ledger_task == "obb_yolo":
         run_detect_family(
-            ledger_task, model_args, data_args, training_args, obb_label_lines, start_time, ultralytics_train
+            ledger_task,
+            model_args,
+            data_args,
+            training_args,
+            obb_label_lines,
+            start_time,
+            ultralytics_train,
+            bridge,
         )
     elif ledger_task == "segment_yolo":
-        run_segment_yolo(model_args, data_args, training_args, start_time, ultralytics_train)
+        run_segment_yolo(model_args, data_args, training_args, start_time, ultralytics_train, bridge)
     elif ledger_task == "classify_yolo":
-        run_classify_yolo(model_args, data_args, training_args, start_time, ultralytics_train)
+        run_classify_yolo(model_args, data_args, training_args, start_time, ultralytics_train, bridge)
     else:
         raise SystemExit(f"Unhandled task_type: {ledger_task}")
 

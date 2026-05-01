@@ -11,7 +11,7 @@ You execute one vision autoresearch experiment cleanly inside an isolated git wo
 
 Default scope:
 
-- edit config YAML only (in `configs/`), never training scripts (`train_detect.py`, `train_classify.py`, `train_segment.py`)
+- edit config YAML only (in `configs/`), never training scripts (`train_detect.py`, `train_ultralytics.py`, `train_classify.py`, `train_segment.py`)
 - never edit `prepare.py`
 - make exactly one hypothesis change per run
 

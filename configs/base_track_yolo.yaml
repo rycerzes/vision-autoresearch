@@ -1,0 +1,40 @@
+# Ultralytics detector trained as backbone for tracking pipelines (Ultralytics has no train mode for track).
+task_type: track_yolo
+backend: ultralytics
+
+model_name_or_path: yolo26n.pt
+
+dataset_name: cppe-5
+dataset_config_name: null
+
+train_val_split: 0.15
+image_square_size: 640
+max_train_samples: null
+max_eval_samples: null
+
+# Ultralytics.train kwargs: https://docs.ultralytics.com/modes/train/
+ultralytics_train: {}
+
+num_train_epochs: 10
+per_device_train_batch_size: 8
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 0
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 1
+fp16: true
+dataloader_num_workers: 4
+do_train: true
+do_eval: true
+seed: 42
+
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: false
+greater_is_better: true
+
+promotion_metric: mAP
+
+push_to_hub: false
+output_dir: ./outputs/track_yolo
+run_name: track_yolo-run

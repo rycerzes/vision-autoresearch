@@ -15,7 +15,21 @@ def main():
     # validate command
     val_parser = sub.add_parser("validate", help="Validate a dataset for a task")
     val_parser.add_argument("--dataset", required=True)
-    val_parser.add_argument("--task", required=True, choices=["detect", "classify", "segment"])
+    val_parser.add_argument(
+        "--task",
+        required=True,
+        choices=[
+            "detect",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+            "classify",
+            "segment",
+        ],
+    )
     val_parser.add_argument("--split", default="train")
     val_parser.add_argument("--config", default=None)
 

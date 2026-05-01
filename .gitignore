@@ -220,6 +220,10 @@ __marimo__/
 docs/
 skills/
 multiautoresearch/
+ml-intern/
 
 # comment out the below when running autoresearcher
 trainer_output/
+outputs/
+
+*.pt

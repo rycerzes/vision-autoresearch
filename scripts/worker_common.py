@@ -192,7 +192,7 @@ def build_worker_contract(state: dict) -> str:
         "",
         "Allowed edit scope:",
         f"- edit `{config}` only",
-        "- never edit training scripts (`train_detect.py`, `train_classify.py`, `train_segment.py`)",
+        "- never edit training scripts (`train_detect.py`, `train_ultralytics.py`, `train_classify.py`, `train_segment.py`)",
         "- never edit `prepare.py`",
         "- make exactly one config knob change",
         "",

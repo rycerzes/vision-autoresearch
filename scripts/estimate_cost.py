@@ -22,6 +22,12 @@ GPU_HOURLY_RATES = {
 
 ESTIMATED_MINUTES = {
     "detect": {"small": 15, "medium": 45, "large": 120},
+    "detect_yolo": {"small": 15, "medium": 45, "large": 120},
+    "track_yolo": {"small": 15, "medium": 45, "large": 120},
+    "pose_yolo": {"small": 20, "medium": 50, "large": 130},
+    "obb_yolo": {"small": 20, "medium": 50, "large": 130},
+    "segment_yolo": {"small": 20, "medium": 55, "large": 150},
+    "classify_yolo": {"small": 10, "medium": 30, "large": 90},
     "classify": {"small": 10, "medium": 30, "large": 90},
     "segment": {"small": 20, "medium": 60, "large": 180},
 }
@@ -88,7 +94,21 @@ def estimate(task: str, config_path: Path, flavor: str = "l4") -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Estimate HF Jobs cost for a run.")
-    parser.add_argument("--task", required=True, choices=["detect", "classify", "segment"])
+    parser.add_argument(
+        "--task",
+        required=True,
+        choices=[
+            "detect",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+            "classify",
+            "segment",
+        ],
+    )
     parser.add_argument("--config", type=Path, help="Config YAML path")
     parser.add_argument("--flavor", default="l4", choices=list(GPU_HOURLY_RATES.keys()))
     args = parser.parse_args()

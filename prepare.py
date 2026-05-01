@@ -10,6 +10,7 @@ Read-only during experiments -- never modified by experiment workers.
 
 Usage:
     python prepare.py --dataset cppe-5 --task detect --split train
+    python prepare.py --dataset cppe-5 --task detect_yolo --split train
     python prepare.py --dataset food101 --task classify --split train
     python prepare.py --dataset <name> --task segment --split train
     python prepare.py --dataset cppe-5 --task detect --split train --inspect
@@ -287,12 +288,24 @@ def _try_json(value) -> Any:
 
 VALIDATORS = {
     "detect": validate_detection_schema,
+    "detect_yolo": validate_detection_schema,
+    "track_yolo": validate_detection_schema,
+    "segment_yolo": validate_segmentation_schema,
+    "classify_yolo": validate_classification_schema,
+    "pose_yolo": validate_detection_schema,
+    "obb_yolo": validate_detection_schema,
     "classify": validate_classification_schema,
     "segment": validate_segmentation_schema,
 }
 
 INSPECTORS = {
     "detect": inspect_detection_samples,
+    "detect_yolo": inspect_detection_samples,
+    "track_yolo": inspect_detection_samples,
+    "segment_yolo": inspect_segmentation_samples,
+    "classify_yolo": inspect_classification_samples,
+    "pose_yolo": inspect_detection_samples,
+    "obb_yolo": inspect_detection_samples,
     "classify": inspect_classification_samples,
     "segment": inspect_segmentation_samples,
 }
@@ -337,22 +350,31 @@ def validate_dataset(
             config = configs[0]
 
     try:
-        ds = load_dataset(dataset_name, config, split=split, streaming=True)
-        samples = []
-        for i, sample in enumerate(ds):
-            samples.append(sample)
-            if i + 1 >= num_samples:
-                break
+        # Prefer a bounded non-streaming slice: streaming mode often leaves HF/fsspec
+        # worker threads running; interpreter shutdown then blocks after validation
+        # output is printed, so the CLI appears "stuck" on success.
+        slice_split = f"{split}[:{num_samples}]"
+        ds = load_dataset(dataset_name, config, split=slice_split, streaming=False)
+        samples = [ds[i] for i in range(len(ds))]
         features = ds.features
-    except Exception as e:
-        return {
-            "valid": False,
-            "errors": [f"Failed to load dataset: {e}"],
-            "columns": [],
-            "num_rows": 0,
-            "config": config,
-            "inspection": None,
-        }
+    except Exception:
+        try:
+            ds = load_dataset(dataset_name, config, split=split, streaming=True)
+            samples = []
+            for i, sample in enumerate(ds):
+                samples.append(sample)
+                if i + 1 >= num_samples:
+                    break
+            features = ds.features
+        except Exception as e:
+            return {
+                "valid": False,
+                "errors": [f"Failed to load dataset: {e}"],
+                "columns": [],
+                "num_rows": 0,
+                "config": config,
+                "inspection": None,
+            }
 
     column_names = list(features.keys())
     validator = VALIDATORS[task_type]
@@ -388,7 +410,21 @@ def validate_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Validate a HF dataset for vision training")
     parser.add_argument("--dataset", required=True, help="HF Hub dataset name")
-    parser.add_argument("--task", required=True, choices=["detect", "classify", "segment"])
+    parser.add_argument(
+        "--task",
+        required=True,
+        choices=[
+            "detect",
+            "detect_yolo",
+            "track_yolo",
+            "segment_yolo",
+            "classify_yolo",
+            "pose_yolo",
+            "obb_yolo",
+            "classify",
+            "segment",
+        ],
+    )
     parser.add_argument("--split", default="train")
     parser.add_argument("--config", default=None, help="Dataset config name")
     parser.add_argument("--inspect", action="store_true", help="Run deeper sample-level inspection")

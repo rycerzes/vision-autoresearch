@@ -334,6 +334,16 @@ class YoloDataArguments:
         default=None,
         metadata={"help": "Semantic mask column for segment_yolo (auto if unset)."},
     )
+    objects_category_field: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Which ``objects`` sub-field holds per-instance class ids or names for detection-like tasks. "
+                "Use ``auto`` (default) to pick the first present among category, label, categories "
+                "(same order as prepare.py). Set to ``label`` for datasets that use objects['label'] only."
+            )
+        },
+    )
 
 
 def _slug_class_name(name: str) -> str:
@@ -462,17 +472,80 @@ def emit_summary(
     print("--- END SUMMARY ---")
 
 
-def discover_categories_and_remap(dataset: DatasetDict) -> dict[int, str]:
-    categories = None
+_OBJECTS_CATEGORY_KEYS = ("category", "label", "categories")
+
+
+def _objects_category_source_key(sample_objects: dict[str, Any], explicit: Optional[str]) -> str:
+    """Resolve which objects sub-field holds class labels (aligned with prepare.py detection inspection)."""
+    raw = str(explicit).strip() if explicit is not None else ""
+    raw_lower = raw.lower()
+    if raw_lower and raw_lower != "auto":
+        if raw in sample_objects:
+            return raw
+        for smk in sample_objects:
+            if smk.lower() == raw_lower:
+                return smk
+        raise SystemExit(
+            f"objects_category_field={explicit!r} not found under objects; "
+            f"keys present: {sorted(sample_objects)}"
+        )
+    for k in _OBJECTS_CATEGORY_KEYS:
+        if k in sample_objects:
+            return k
+    raise SystemExit(
+        "Detection-like YOLO export requires objects to contain one of: "
+        "category, label, or categories (see prepare.py). "
+        f"Found objects keys: {sorted(sample_objects)}"
+    )
+
+
+def _category_classlabel_names_from_features(ds_train: Dataset) -> Optional[list[str]]:
+    """Read ClassLabel.names from objects.{category|label|categories} if present."""
     try:
-        if isinstance(dataset["train"].features["objects"], dict):
-            cat_feature = dataset["train"].features["objects"]["category"].feature
-        else:
-            cat_feature = dataset["train"].features["objects"].feature["category"]
-        if hasattr(cat_feature, "names"):
-            categories = cat_feature.names
-    except (AttributeError, KeyError, TypeError):
-        pass
+        objects_feat = ds_train.features["objects"]
+    except KeyError:
+        return None
+    for key in _OBJECTS_CATEGORY_KEYS:
+        try:
+            if isinstance(objects_feat, dict):
+                sub = objects_feat[key]
+            elif hasattr(objects_feat, "feature"):
+                sub = objects_feat.feature[key]
+            else:
+                continue
+            cat_feature = sub.feature if hasattr(sub, "feature") else sub
+            if hasattr(cat_feature, "names") and cat_feature.names:
+                return list(cat_feature.names)
+        except (KeyError, AttributeError, TypeError):
+            continue
+    return None
+
+
+def ensure_objects_have_category_column(dataset: DatasetDict, explicit_field: Optional[str]) -> None:
+    """Copy ``label`` / ``categories`` into ``category`` when the canonical key is absent."""
+    sample_o = dataset["train"][0]["objects"]
+    if not isinstance(sample_o, dict):
+        raise SystemExit(
+            "Expected objects to be a dict with bbox + category/label; "
+            "got a non-dict objects column."
+        )
+    src = _objects_category_source_key(sample_o, explicit_field)
+    if src == "category":
+        return
+
+    def _copy_into_category(example: dict[str, Any]) -> dict[str, Any]:
+        o = dict(example["objects"])
+        if "category" not in o:
+            o["category"] = o[src]
+        example["objects"] = o
+        return example
+
+    for split_name in list(dataset.keys()):
+        dataset[split_name] = dataset[split_name].map(_copy_into_category)
+
+
+def discover_categories_and_remap(dataset: DatasetDict) -> dict[int, str]:
+    categories = _category_classlabel_names_from_features(dataset["train"])
 
     if categories is None:
         logger.info("Category feature is not ClassLabel — scanning dataset...")
@@ -554,6 +627,8 @@ def prepare_detection_like_dataset(
         split = dataset["train"].train_test_split(tv_split, seed=training_args.seed)
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
+
+    ensure_objects_have_category_column(dataset, data_args.objects_category_field)
 
     id2label = discover_categories_and_remap(dataset)
 

@@ -5,7 +5,7 @@ master per task type.
 
 ## Goal
 
-Maximize the promotion metric (mAP, accuracy, IoU, or Dice depending on task)
+Optimize the configured promotion metric (mAP, accuracy, IoU, Dice, or task-specific scalar)
 on a given dataset with disciplined, comparable single-change experiments.
 
 ## Hard Rules
@@ -23,8 +23,9 @@ on a given dataset with disciplined, comparable single-change experiments.
 - Run the benchmark before claiming success.
 - Record every completed run with
   `uv run scripts/submit_patch.py --comment "..."`
-- Promotion is local and only happens when the promotion metric beats current
-  master. All vision metrics are **higher-is-better**.
+- Promotion is local and only happens when the configured promotion policy
+  beats current master. Direction is **higher** or **lower** depending on the
+  metric (see `promotion:` in config and `scripts/vision_lab/metrics.py`).
 - Keep machine-local compatibility shims out of promoted configs.
 
 ## Supported Tasks
@@ -34,7 +35,7 @@ on a given dataset with disciplined, comparable single-change experiments.
 | `detect` | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
 | `detect_yolo` | `train_ultralytics.py` (via `train_detect_yolo.py`) | `yolo26n.pt` (Ultralytics) | mAP |
 | `track_yolo` | `train_ultralytics.py` | `yolo26n.pt` | mAP (detector training for tracking) |
-| `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | IoU (mask mAP proxy) |
+| `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | mask mAP (`mAP_50`) |
 | `classify_yolo` | `train_ultralytics.py` | `yolo26n-cls.pt` | accuracy |
 | `pose_yolo` | `train_ultralytics.py` | `yolo26n-pose.pt` | mAP |
 | `obb_yolo` | `train_ultralytics.py` | `yolo26n-obb.pt` | mAP |
@@ -53,6 +54,12 @@ such as:
 - `image_size`, `use_albumentations`, `use_trivial_augment`
 - `freeze_backbone`, `prompt_type`, `loss_type`
 - `num_train_epochs`
+- Optional **`promotion`**: YAML mapping with `primary`, `direction` (`higher` or
+  `lower`), `min_delta`, optional `secondary`, optional `gates` (list of
+  `{metric, min?, max?}` thresholds on the candidate run), and optional
+  `tie_breakers` (metric names). If omitted, `promotion_metric` (legacy string)
+  plus task defaults from `scripts/vision_lab/task_registry.py` apply. Metrics
+  JSON artifacts are written under `research/runs/<run_id>/metrics.json`.
 
 For **YOLO-family tasks** (`*_yolo`), Ultralytics is the trainer. Use the
 top-level YAML mapping `ultralytics_train` to pass
@@ -132,6 +139,7 @@ For local GPU execution:
   `train_classify.py`, `train_segment.py` — stable training scripts (do not edit during experiments).
 - `prepare.py` — dataset validation (never edit).
 - `research/results.tsv` — append-only local run ledger.
+- `research/runs/` — per-run `metrics.json` artifacts (written by `submit_patch.py`).
 - `research/live/` — current local promoted master and DAG.
 - `research/reference/` — seed master snapshots.
 - `research/notes.md` — experiment notebook.

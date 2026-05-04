@@ -12,10 +12,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# vision_lab lives next to this file under scripts/vision_lab
-from vision_lab.metrics import PROMOTION_METRICS_HIGHER
-
 RESEARCH_DIR = ROOT / "research"
+RUNS_DIR = RESEARCH_DIR / "runs"
 LIVE_DIR = RESEARCH_DIR / "live"
 REFERENCE_DIR = RESEARCH_DIR / "reference"
 RESULTS_PATH = RESEARCH_DIR / "results.tsv"
@@ -26,7 +24,7 @@ DAG_PATH = LIVE_DIR / "dag.json"
 MASTER_SEED_PATH = REFERENCE_DIR / "master.seed.json"
 MASTER_DETAIL_SEED_PATH = REFERENCE_DIR / "master_detail.seed.json"
 
-RESULTS_COLUMNS = [
+LEGACY_RESULTS_COLUMNS = (
     "run_id",
     "created_at",
     "status",
@@ -54,12 +52,43 @@ RESULTS_COLUMNS = [
     "peak_vram_mb",
     "promoted",
     "comment",
+)
+
+RESULTS_COLUMNS = [
+    "run_id",
+    "created_at",
+    "status",
+    "job_id",
+    "task_type",
+    "backend",
+    "campaign",
+    "experiment_id",
+    "worker_id",
+    "hypothesis",
+    "model_name",
+    "dataset_name",
+    "config_hash",
+    "parent_hash",
+    "candidate_hash",
+    "promotion_metric",
+    "promotion_metric_value",
+    "promotion_baseline_value",
+    "promotion_delta",
+    "promotion_relative_delta",
+    "promotion_min_delta_met",
+    "promotion_gates_met",
+    "promotion_rerun_recommended",
+    "mAP",
+    "mAP_50",
+    "accuracy",
+    "iou",
+    "dice",
+    "training_seconds",
+    "total_seconds",
+    "peak_vram_mb",
+    "promoted",
+    "comment",
 ]
-
-# Scalar promotion targets that use strict greater-than comparison today.
-HIGHER_IS_BETTER_METRICS = PROMOTION_METRICS_HIGHER
-
-
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -129,12 +158,29 @@ def load_results_rows() -> list[dict[str, str]]:
         return []
     with RESULTS_PATH.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
-        if reader.fieldnames != RESULTS_COLUMNS:
-            raise RuntimeError(
-                f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
-                f"expected {RESULTS_COLUMNS}, got {reader.fieldnames}"
-            )
-        return [normalize_row(row) for row in reader]
+        fieldnames = tuple(reader.fieldnames or ())
+        if fieldnames == tuple(RESULTS_COLUMNS):
+            rows = [normalize_row(row) for row in reader]
+            return rows
+        if fieldnames == LEGACY_RESULTS_COLUMNS:
+            migrated: list[dict[str, str]] = []
+            for row in reader:
+                wide = {col: row.get(col, "") for col in RESULTS_COLUMNS}
+                migrated.append(normalize_row(wide))
+            write_results_rows(migrated)
+            return migrated
+        raise RuntimeError(
+            f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
+            f"expected {RESULTS_COLUMNS} or legacy {LEGACY_RESULTS_COLUMNS}, "
+            f"got {reader.fieldnames}"
+        )
+
+
+def write_run_metrics_artifact(run_id: str, payload: dict[str, Any]) -> Path:
+    """Persist structured metrics + promotion evaluation under ``research/runs/<run_id>/``."""
+    out_path = RUNS_DIR / run_id / "metrics.json"
+    write_json(out_path, payload)
+    return out_path
 
 
 def write_results_rows(rows: list[dict[str, object]]) -> None:
@@ -261,15 +307,6 @@ def current_promoted_row(
 def current_master_hash(rows: list[dict[str, str]] | None = None) -> str | None:
     row = current_promoted_row(rows)
     return row["candidate_hash"] if row else None
-
-
-def is_improvement(new_value: float, old_value: float | None, metric: str) -> bool:
-    """Check if new_value beats old_value. All vision metrics are higher-is-better."""
-    if old_value is None:
-        return True
-    if metric not in HIGHER_IS_BETTER_METRICS:
-        raise ValueError(f"Unknown metric: {metric}. Expected one of {HIGHER_IS_BETTER_METRICS}")
-    return new_value > old_value
 
 
 def build_master_snapshot(row: dict[str, str]) -> dict[str, Any]:

@@ -3,7 +3,7 @@
 Stable infrastructure — experiments modify config YAMLs only.
 
 Supported ``task_type`` values (promotion metric in parentheses):
-  detect_yolo (mAP), track_yolo (mAP), segment_yolo (IoU mask mAP proxy),
+  detect_yolo (mAP), track_yolo (mAP), segment_yolo (mask mAP / mAP_50 from Ultralytics),
   classify_yolo (accuracy), pose_yolo (mAP pose proxy), obb_yolo (mAP OBB proxy).
 
 ``track_yolo`` trains a detector (Ultralytics has no ``train`` mode for tracking);
@@ -436,17 +436,17 @@ def read_classify_metrics(run_dir: Path) -> dict[str, float]:
 
 
 def read_segment_metrics(run_dir: Path) -> dict[str, float]:
-    """Use mask branch mAP@50 as IoU-like promotion proxy for segment_yolo."""
+    """Mask-branch detection metrics from Ultralytics (honest mAP names; not IoU)."""
     csv_path = run_dir / "results.csv"
     if not csv_path.exists():
-        return {"iou": 0.0, "mAP": 0.0, "mAP_50": 0.0}
+        return {"mAP": 0.0, "mAP_50": 0.0}
     rows = list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
     if not rows:
-        return {"iou": 0.0, "mAP": 0.0, "mAP_50": 0.0}
+        return {"mAP": 0.0, "mAP_50": 0.0}
     last = rows[-1]
     map50_m = pick_csv_metric(last, ("metrics/mAP50(M)",))
     map5095_m = pick_csv_metric(last, ("metrics/mAP50-95(M)",))
-    return {"iou": map50_m, "mAP": map5095_m, "mAP_50": map50_m}
+    return {"mAP": map5095_m, "mAP_50": map50_m}
 
 
 def emit_summary(

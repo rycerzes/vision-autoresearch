@@ -60,7 +60,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         id="segment_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="iou",
+        default_promotion_metric="mAP_50",
         dataset_schema_kind="segmentation",
     ),
     TaskSpec(

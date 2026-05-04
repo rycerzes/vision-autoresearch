@@ -22,9 +22,16 @@ import argparse
 import json as json_mod
 import math
 import sys
+from pathlib import Path
 from typing import Any
 
 from datasets import load_dataset, get_dataset_config_names
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from vision_lab.task_registry import TASK_BY_ID, all_task_ids
 from huggingface_hub import dataset_info
 
 
@@ -286,28 +293,25 @@ def _try_json(value) -> Any:
         return None
 
 
-VALIDATORS = {
-    "detect": validate_detection_schema,
-    "detect_yolo": validate_detection_schema,
-    "track_yolo": validate_detection_schema,
-    "segment_yolo": validate_segmentation_schema,
-    "classify_yolo": validate_classification_schema,
-    "pose_yolo": validate_detection_schema,
-    "obb_yolo": validate_detection_schema,
-    "classify": validate_classification_schema,
-    "segment": validate_segmentation_schema,
+_SCHEMA_VALIDATORS = {
+    "detection": validate_detection_schema,
+    "segmentation": validate_segmentation_schema,
+    "classification": validate_classification_schema,
 }
 
+_SCHEMA_INSPECTORS = {
+    "detection": inspect_detection_samples,
+    "segmentation": inspect_segmentation_samples,
+    "classification": inspect_classification_samples,
+}
+
+VALIDATORS = {
+    tid: _SCHEMA_VALIDATORS[spec.dataset_schema_kind]
+    for tid, spec in TASK_BY_ID.items()
+}
 INSPECTORS = {
-    "detect": inspect_detection_samples,
-    "detect_yolo": inspect_detection_samples,
-    "track_yolo": inspect_detection_samples,
-    "segment_yolo": inspect_segmentation_samples,
-    "classify_yolo": inspect_classification_samples,
-    "pose_yolo": inspect_detection_samples,
-    "obb_yolo": inspect_detection_samples,
-    "classify": inspect_classification_samples,
-    "segment": inspect_segmentation_samples,
+    tid: _SCHEMA_INSPECTORS[spec.dataset_schema_kind]
+    for tid, spec in TASK_BY_ID.items()
 }
 
 
@@ -413,17 +417,7 @@ def main():
     parser.add_argument(
         "--task",
         required=True,
-        choices=[
-            "detect",
-            "detect_yolo",
-            "track_yolo",
-            "segment_yolo",
-            "classify_yolo",
-            "pose_yolo",
-            "obb_yolo",
-            "classify",
-            "segment",
-        ],
+        choices=list(all_task_ids()),
     )
     parser.add_argument("--split", default="train")
     parser.add_argument("--config", default=None, help="Dataset config name")

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+sys.path.insert(0, str(_SCRIPTS_DIR))
+from vision_lab.task_registry import all_task_ids
 
 from prepare import validate_dataset
 
@@ -18,17 +23,7 @@ def main():
     val_parser.add_argument(
         "--task",
         required=True,
-        choices=[
-            "detect",
-            "detect_yolo",
-            "track_yolo",
-            "segment_yolo",
-            "classify_yolo",
-            "pose_yolo",
-            "obb_yolo",
-            "classify",
-            "segment",
-        ],
+        choices=list(all_task_ids()),
     )
     val_parser.add_argument("--split", default="train")
     val_parser.add_argument("--config", default=None)

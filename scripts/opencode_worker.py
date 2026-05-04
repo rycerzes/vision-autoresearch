@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vision_lab.task_registry import all_task_ids
 from worker_common import (
     build_worker_contract,
     cleanup_worktree,
@@ -97,17 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument(
         "--task",
         required=True,
-        choices=[
-            "detect",
-            "classify",
-            "segment",
-            "detect_yolo",
-            "track_yolo",
-            "segment_yolo",
-            "classify_yolo",
-            "pose_yolo",
-            "obb_yolo",
-        ],
+        choices=list(all_task_ids()),
         help="Vision task type",
     )
     create.add_argument("--config", help="Config YAML path (defaults to base config for task)")

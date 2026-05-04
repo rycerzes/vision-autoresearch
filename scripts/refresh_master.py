@@ -13,12 +13,13 @@ from local_results import (
     MASTER_DETAIL_PATH,
     MASTER_PATH,
     ROOT,
+    build_master_snapshot,
     current_promoted_row,
     ensure_results_ledger,
     load_json,
     write_json,
-    build_master_snapshot,
 )
+from vision_lab.task_registry import all_task_ids
 
 
 def restore_config(task_type: str, force: bool = False) -> dict:
@@ -74,17 +75,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--task",
-        choices=[
-            "detect",
-            "classify",
-            "segment",
-            "detect_yolo",
-            "track_yolo",
-            "segment_yolo",
-            "classify_yolo",
-            "pose_yolo",
-            "obb_yolo",
-        ],
+        choices=list(all_task_ids()),
         help="Task type to restore (auto-detected from master_detail if omitted)",
     )
     parser.add_argument(

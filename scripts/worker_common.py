@@ -217,7 +217,7 @@ def build_worker_contract(state: dict) -> str:
         f"- stream logs with `uv run scripts/hf_job.py logs <JOB_ID> --follow --output $VISION_LOG_PATH`",
         "- parse the final metric with `uv run scripts/parse_metric.py <log-path>`",
         '- record the run with `uv run scripts/submit_patch.py --comment "..."`',
-        "- promotion only happens if the promotion metric beats current master (higher-is-better)",
+        "- promotion only happens when the configured promotion policy beats current master (higher- or lower-is-better)",
         "",
         "Final report must include:",
         "- hypothesis tested",

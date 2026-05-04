@@ -12,59 +12,37 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from local_results import (
     CONFIGS_DIR,
-    LIVE_DIR,
     MASTER_DETAIL_PATH,
-    MASTER_PATH,
-    RESULTS_PATH,
     ROOT,
     append_result_row,
-    build_master_snapshot,
     config_hash,
     current_master_snapshot,
     current_promoted_row,
     ensure_results_ledger,
-    is_improvement,
     load_json,
-    load_results_rows,
-    normalize_row,
     now_utc_iso,
     parse_float,
     rebuild_live_state,
     stringify_field,
     truthy,
     write_json,
-    write_results_rows,
+    write_run_metrics_artifact,
 )
 from parse_metric import parse_summary
+from vision_lab.promotion import (
+    evaluate_promotion,
+    evaluation_to_jsonable,
+    load_promotion_policy,
+    policy_to_jsonable,
+)
+from vision_lab.task_registry import all_task_ids
 import yaml
 
 
 RUNTIME_DIR = ROOT / ".runtime"
 LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
 
-METRIC_FOR_TASK = {
-    "detect": "mAP",
-    "detect_yolo": "mAP",
-    "track_yolo": "mAP",
-    "segment_yolo": "iou",
-    "classify_yolo": "accuracy",
-    "pose_yolo": "mAP",
-    "obb_yolo": "mAP",
-    "classify": "accuracy",
-    "segment": "iou",
-}
-
-_SUBMIT_TASK_CHOICES = [
-    "detect",
-    "classify",
-    "segment",
-    "detect_yolo",
-    "track_yolo",
-    "segment_yolo",
-    "classify_yolo",
-    "pose_yolo",
-    "obb_yolo",
-]
+_SUBMIT_TASK_CHOICES = list(all_task_ids())
 
 
 def env_context() -> dict[str, str]:
@@ -171,36 +149,45 @@ def main() -> int:
     task_type = args.task or str(metrics.get("task_type", ""))
     if not task_type:
         raise SystemExit("Could not determine task_type; pass --task explicitly")
-
-    promotion_metric = METRIC_FOR_TASK.get(task_type)
-    if not promotion_metric:
-        raise SystemExit(f"Unknown task type: {task_type}")
+    if task_type not in _SUBMIT_TASK_CHOICES:
+        raise SystemExit(f"Unknown task type: {task_type!r}")
 
     config_path = resolve_config_path(
         task_type, str(args.config) if args.config else None
     )
     c_hash = config_hash(config_path) if config_path.exists() else ""
 
-    context = env_context()
-    existing_rows = ensure_results_ledger(task_type)
-    current_master = current_master_snapshot(existing_rows, task_type=task_type)
-
-    candidate_value = parse_float(metrics.get(promotion_metric))
-    if current_master:
-        master_value = parse_float(current_master.get("promotion_metric_value"))
-    else:
-        master_value = None
-
-    promoted = candidate_value is not None and is_improvement(
-        candidate_value, master_value, promotion_metric
-    )
-    status = "completed" if candidate_value is not None else "missing_metric"
-
     config_data = (
         yaml.safe_load(config_path.read_text(encoding="utf-8"))
         if config_path.exists()
         else {}
     )
+
+    try:
+        promotion_policy = load_promotion_policy(
+            config_data if isinstance(config_data, dict) else {},
+            task_id=task_type,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    context = env_context()
+    existing_rows = ensure_results_ledger(task_type)
+    current_master = current_master_snapshot(existing_rows, task_type=task_type)
+    baseline_row = current_promoted_row(existing_rows, task_type=task_type)
+
+    promotion_eval = evaluate_promotion(
+        policy=promotion_policy,
+        candidate_metrics=metrics,
+        baseline_row=baseline_row,
+    )
+    promoted = promotion_eval.promoted
+    promotion_metric = promotion_eval.primary
+
+    candidate_value = parse_float(metrics.get(promotion_metric))
+    status = "completed" if candidate_value is not None else "missing_metric"
+
+    master_value = promotion_eval.baseline_value
 
     job_id = args.job_id or ""
     row = {
@@ -223,6 +210,12 @@ def main() -> int:
         "candidate_hash": c_hash,
         "promotion_metric": promotion_metric,
         "promotion_metric_value": metrics.get(promotion_metric, ""),
+        "promotion_baseline_value": stringify_field(promotion_eval.baseline_value),
+        "promotion_delta": stringify_field(promotion_eval.delta),
+        "promotion_relative_delta": stringify_field(promotion_eval.relative_delta),
+        "promotion_min_delta_met": stringify_field(promotion_eval.min_delta_met),
+        "promotion_gates_met": stringify_field(promotion_eval.gates_met),
+        "promotion_rerun_recommended": stringify_field(promotion_eval.rerun_recommended),
         "mAP": metrics.get("mAP", ""),
         "mAP_50": metrics.get("mAP_50", ""),
         "accuracy": metrics.get("accuracy", ""),
@@ -245,15 +238,9 @@ def main() -> int:
         },
         "promotion": {
             "promoted": promoted,
-            "reason": (
-                f"{candidate_value} > {master_value} ({promotion_metric})"
-                if promoted
-                else (
-                    f"missing {promotion_metric}"
-                    if candidate_value is None
-                    else f"{candidate_value} <= {master_value} ({promotion_metric})"
-                )
-            ),
+            "reason": promotion_eval.reason,
+            "evaluation": evaluation_to_jsonable(promotion_eval),
+            "policy": policy_to_jsonable(promotion_policy),
         },
     }
 
@@ -264,14 +251,23 @@ def main() -> int:
     rebuild_live_state(existing_rows)
     appended = append_result_row(row)
 
+    metrics_payload = {
+        "run_id": appended["run_id"],
+        "task_type": task_type,
+        "metrics": {k: metrics[k] for k in sorted(metrics.keys())},
+        "promotion_policy": policy_to_jsonable(promotion_policy),
+        "promotion_evaluation": evaluation_to_jsonable(promotion_eval),
+    }
+    write_run_metrics_artifact(appended["run_id"], metrics_payload)
+
     if truthy(appended["promoted"]):
         updated_rows = [*existing_rows, appended]
         rebuild_live_state(updated_rows)
         write_master_config(config_path, task_type)
-        print(f"PROMOTED: {promotion_metric}={candidate_value} (was {master_value})")
+        print(f"PROMOTED: {promotion_metric}={candidate_value} ({promotion_eval.reason})")
     else:
         print(
-            f"NOT promoted: {promotion_metric}={candidate_value} (master={master_value})"
+            f"NOT promoted: {promotion_metric}={candidate_value} ({promotion_eval.reason})"
         )
 
     print(json.dumps({**preview, "recorded": True}, indent=2, sort_keys=True))

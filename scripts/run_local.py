@@ -11,23 +11,14 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
-_ULTRA_TASKS = (
-    "detect_yolo",
-    "track_yolo",
-    "segment_yolo",
-    "classify_yolo",
-    "pose_yolo",
-    "obb_yolo",
-)
-TASK_SCRIPTS = {
-    "detect": "train_detect.py",
-    "classify": "train_classify.py",
-    "segment": "train_segment.py",
-    **dict.fromkeys(_ULTRA_TASKS, "train_ultralytics.py"),
-}
+from vision_lab.task_registry import all_task_ids, task_script_map
 
-_CLI_TASKS = ["detect", "classify", "segment"] + list(_ULTRA_TASKS)
+TASK_SCRIPTS = task_script_map()
+_CLI_TASKS = list(all_task_ids())
 
 
 def resolve_task_from_config(config_path: Path) -> str | None:

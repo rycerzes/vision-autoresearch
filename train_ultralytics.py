@@ -2,9 +2,17 @@
 
 Stable infrastructure — experiments modify config YAMLs only.
 
-Supported ``task_type`` values (promotion metric in parentheses):
-  detect_yolo (mAP), track_yolo (mAP), segment_yolo (IoU mask mAP proxy),
-  classify_yolo (accuracy), pose_yolo (mAP pose proxy), obb_yolo (mAP OBB proxy).
+Entrypoint: **only** ``train_ultralytics.py`` for all ``*_yolo`` tasks (via config
+``task_type``).
+
+Supported ``task_type`` values (default promotion primary in parentheses; see
+``vision_lab.task_registry`` and ``vision_lab.metrics``):
+
+  detect_yolo (mAP), track_yolo (mAP), segment_yolo (mAP_50 mask branch),
+  classify_yolo (accuracy), pose_yolo (mAP), obb_yolo (mAP).
+
+Summary lines use canonical metric keys from ``vision_lab.metrics.METRICS`` where
+applicable; remaining numeric keys are emitted after those in sorted order.
 
 ``track_yolo`` trains a detector (Ultralytics has no ``train`` mode for tracking);
 use the same detection dataset contract; tracking inference is separate.
@@ -74,6 +82,11 @@ from train_detect import ModelArguments, detect_bbox_format_from_samples, saniti
 from ultralytics import YOLO
 from ultralytics.cfg import DEFAULT_CFG
 from ultralytics.models.yolo.model import YOLOE, YOLOWorld
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from vision_lab.metrics import METRICS
 
 logger = logging.getLogger(__name__)
 
@@ -436,17 +449,28 @@ def read_classify_metrics(run_dir: Path) -> dict[str, float]:
 
 
 def read_segment_metrics(run_dir: Path) -> dict[str, float]:
-    """Use mask branch mAP@50 as IoU-like promotion proxy for segment_yolo."""
+    """Mask-branch detection metrics from Ultralytics (honest mAP names; not IoU)."""
     csv_path = run_dir / "results.csv"
     if not csv_path.exists():
-        return {"iou": 0.0, "mAP": 0.0, "mAP_50": 0.0}
+        return {"mAP": 0.0, "mAP_50": 0.0}
     rows = list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
     if not rows:
-        return {"iou": 0.0, "mAP": 0.0, "mAP_50": 0.0}
+        return {"mAP": 0.0, "mAP_50": 0.0}
     last = rows[-1]
     map50_m = pick_csv_metric(last, ("metrics/mAP50(M)",))
     map5095_m = pick_csv_metric(last, ("metrics/mAP50-95(M)",))
-    return {"iou": map50_m, "mAP": map5095_m, "mAP_50": map50_m}
+    return {"mAP": map5095_m, "mAP_50": map50_m}
+
+
+def _assert_pose_keypoints(dataset: Any, ledger_task: str) -> None:
+    if ledger_task != "pose_yolo":
+        return
+    ex0 = dataset["train"][0]["objects"]
+    if "keypoints" not in ex0:
+        raise SystemExit(
+            "pose_yolo requires HF detection samples with objects['keypoints'] "
+            "(COCO-style flat [x,y,v] triplets per instance)."
+        )
 
 
 def emit_summary(
@@ -458,12 +482,13 @@ def emit_summary(
 ) -> None:
     print("\n--- VISION AUTORESEARCH SUMMARY ---")
     print(f"task_type: {ledger_task}")
-    order = ("mAP", "mAP_50", "mAR", "accuracy", "iou", "dice")
-    for key in order:
+    emitted: set[str] = set()
+    for key in METRICS:
         if key in metrics_lines:
             print(f"{key}: {metrics_lines[key]}")
+            emitted.add(key)
     for key, val in sorted(metrics_lines.items()):
-        if key not in order:
+        if key not in emitted:
             print(f"{key}: {val}")
     print(f"training_seconds: {training_seconds:.1f}")
     print(f"peak_vram_mb: {peak_vram_mb:.0f}")
@@ -981,13 +1006,7 @@ def run_detect_family(
     bridge: dict[str, Any],
 ) -> None:
     dataset, id2label = prepare_detection_like_dataset(model_args, data_args, training_args)
-    if ledger_task == "pose_yolo":
-        ex0 = dataset["train"][0]["objects"]
-        if "keypoints" not in ex0:
-            raise SystemExit(
-                "pose_yolo requires HF detection samples with objects['keypoints'] "
-                "(COCO-style flat [x,y,v] triplets per instance)."
-            )
+    _assert_pose_keypoints(dataset, ledger_task)
     yolo_root = Path(training_args.output_dir) / "yolo_dataset"
     if yolo_root.exists():
         shutil.rmtree(yolo_root)

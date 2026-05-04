@@ -57,9 +57,10 @@ such as:
 - Optional **`promotion`**: YAML mapping with `primary`, `direction` (`higher` or
   `lower`), `min_delta`, optional `secondary`, optional `gates` (list of
   `{metric, min?, max?}` thresholds on the candidate run), and optional
-  `tie_breakers` (metric names). If omitted, `promotion_metric` (legacy string)
-  plus task defaults from `scripts/vision_lab/task_registry.py` apply. Metrics
-  JSON artifacts are written under `research/runs/<run_id>/metrics.json`.
+  `tie_breakers` (metric names). If omitted entirely, **`primary`** and
+  **`direction`** default from `scripts/vision_lab/task_registry.py` and
+  `scripts/vision_lab/metrics.py`. The key `promotion_metric` is not supported.
+  Metrics JSON artifacts are written under `research/runs/<run_id>/metrics.json`.
 
 For **YOLO-family tasks** (`*_yolo`), Ultralytics is the trainer. Use the
 top-level YAML mapping `ultralytics_train` to pass

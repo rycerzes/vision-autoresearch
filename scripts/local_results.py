@@ -24,36 +24,6 @@ DAG_PATH = LIVE_DIR / "dag.json"
 MASTER_SEED_PATH = REFERENCE_DIR / "master.seed.json"
 MASTER_DETAIL_SEED_PATH = REFERENCE_DIR / "master_detail.seed.json"
 
-LEGACY_RESULTS_COLUMNS = (
-    "run_id",
-    "created_at",
-    "status",
-    "job_id",
-    "task_type",
-    "backend",
-    "campaign",
-    "experiment_id",
-    "worker_id",
-    "hypothesis",
-    "model_name",
-    "dataset_name",
-    "config_hash",
-    "parent_hash",
-    "candidate_hash",
-    "promotion_metric",
-    "promotion_metric_value",
-    "mAP",
-    "mAP_50",
-    "accuracy",
-    "iou",
-    "dice",
-    "training_seconds",
-    "total_seconds",
-    "peak_vram_mb",
-    "promoted",
-    "comment",
-)
-
 RESULTS_COLUMNS = [
     "run_id",
     "created_at",
@@ -89,6 +59,8 @@ RESULTS_COLUMNS = [
     "promoted",
     "comment",
 ]
+
+
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -160,19 +132,10 @@ def load_results_rows() -> list[dict[str, str]]:
         reader = csv.DictReader(handle, delimiter="\t")
         fieldnames = tuple(reader.fieldnames or ())
         if fieldnames == tuple(RESULTS_COLUMNS):
-            rows = [normalize_row(row) for row in reader]
-            return rows
-        if fieldnames == LEGACY_RESULTS_COLUMNS:
-            migrated: list[dict[str, str]] = []
-            for row in reader:
-                wide = {col: row.get(col, "") for col in RESULTS_COLUMNS}
-                migrated.append(normalize_row(wide))
-            write_results_rows(migrated)
-            return migrated
+            return [normalize_row(row) for row in reader]
         raise RuntimeError(
             f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
-            f"expected {RESULTS_COLUMNS} or legacy {LEGACY_RESULTS_COLUMNS}, "
-            f"got {reader.fieldnames}"
+            f"expected {RESULTS_COLUMNS}, got {reader.fieldnames}"
         )
 
 
@@ -252,14 +215,14 @@ def seed_row(task_type: str = "detect") -> dict[str, object]:
     content = seed_config_content(seed_task)
     c_hash = config_hash_from_text(content)
     return {
-        "run_id": "legacy_seed",
+        "run_id": "seed",
         "created_at": metadata.get("created_at") or now_utc_iso(),
-        "status": "legacy_seed",
+        "status": "seed",
         "job_id": metadata.get("job_id", ""),
         "task_type": seed_task,
         "backend": metadata.get("backend", "transformers"),
-        "campaign": "legacy-baseline",
-        "experiment_id": "legacy-seed",
+        "campaign": "baseline-seed",
+        "experiment_id": "seed",
         "worker_id": "seed",
         "hypothesis": f"seed local master from base_{seed_task}.yaml",
         "model_name": metadata.get("model_name", ""),

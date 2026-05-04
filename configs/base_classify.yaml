@@ -37,8 +37,11 @@ save_strategy: epoch
 load_best_model_at_end: true
 metric_for_best_model: eval_accuracy
 
-# Promotion metric
-promotion_metric: accuracy
+# Promotion (submit_patch ledger / local master)
+promotion:
+  primary: accuracy
+  direction: higher
+  min_delta: 0.0
 
 # Hub
 push_to_hub: false

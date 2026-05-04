@@ -40,8 +40,11 @@ load_best_model_at_end: true
 metric_for_best_model: eval_mAP
 greater_is_better: true
 
-# Promotion metric
-promotion_metric: mAP
+# Promotion (submit_patch ledger / local master)
+promotion:
+  primary: mAP
+  direction: higher
+  min_delta: 0.0
 
 # Hub
 push_to_hub: false

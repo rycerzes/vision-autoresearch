@@ -48,8 +48,11 @@ load_best_model_at_end: false
 metric_for_best_model: map50
 greater_is_better: true
 
-# Promotion metric (parsed from summary as mAP)
-promotion_metric: mAP
+# Promotion (parsed from summary as mAP)
+promotion:
+  primary: mAP
+  direction: higher
+  min_delta: 0.0
 
 # Hub
 push_to_hub: false

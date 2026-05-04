@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 _MASK_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
@@ -67,7 +67,6 @@ def validate_semantic_masks(root: Path, *, max_check: int = 50) -> dict[str, Any
         "missing_sample": missing,
     }
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="semantic_masks",
@@ -78,4 +77,4 @@ def validate_semantic_masks(root: Path, *, max_check: int = 50) -> dict[str, Any
         row_counts=row_counts,
         inspection=inspection,
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

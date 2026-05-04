@@ -17,18 +17,14 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from vision_lab.task_registry import all_task_ids, task_script_map
 
+from vision_lab.preflight_report import (
+    build_preflight_report,
+    print_preflight_report,
+    resolve_task_from_config,
+)
+
 TASK_SCRIPTS = task_script_map()
 _CLI_TASKS = list(all_task_ids())
-
-
-def resolve_task_from_config(config_path: Path) -> str | None:
-    try:
-        import yaml
-
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        return data.get("task_type") if isinstance(data, dict) else None
-    except Exception:
-        return None
 
 
 def main() -> int:
@@ -44,7 +40,9 @@ def main() -> int:
         "--submit", action="store_true", help="Auto-submit result via submit_patch.py"
     )
     parser.add_argument(
-        "--comment", help="Comment for submit_patch (required if --submit)"
+        "--skip-preflight",
+        action="store_true",
+        help="Skip vision_lab preflight (task/promotion/model/dataset adapter checks)",
     )
     args = parser.parse_args()
 
@@ -61,6 +59,14 @@ def main() -> int:
     train_script = ROOT / TASK_SCRIPTS[task]
     if not train_script.exists():
         raise SystemExit(f"Training script not found: {train_script}")
+
+    if not args.skip_preflight:
+        report = build_preflight_report(task, config_path)
+        print_preflight_report(report)
+        if report.get("errors"):
+            raise SystemExit(
+                "Preflight failed. Fix errors above or pass --skip-preflight."
+            )
 
     log_path = args.output or (
         ROOT / ".runtime" / "local-logs" / f"local-{task}-{int(time.time())}.log"

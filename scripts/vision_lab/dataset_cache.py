@@ -12,6 +12,25 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CACHE_ROOT = REPO_ROOT / ".runtime" / "datasets"
 
 
+def resolve_dataset_cache_parent(
+    *,
+    run_output_dir: Path | str | None = None,
+    explicit_cache_root: Path | str | None = None,
+) -> Path:
+    """
+    Resolve directory under which fingerprinted adapter manifests are stored.
+
+    Priority: ``explicit_cache_root`` > ``run_output_dir/dataset`` > ``.runtime/datasets``.
+    """
+    if explicit_cache_root is not None:
+        return Path(explicit_cache_root).expanduser().resolve()
+    if run_output_dir is not None:
+        p = Path(run_output_dir).expanduser().resolve() / "dataset"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return DEFAULT_CACHE_ROOT
+
+
 def fingerprint_local_tree(root: Path, *, max_paths: int = 800) -> str:
     """
     Stable fingerprint from relative paths and file sizes (bounded work).
@@ -44,10 +63,10 @@ def write_cache_manifest(
     adapter_id: str,
     fingerprint: str,
     report_subset: dict[str, Any],
-    cache_root: Path | None = None,
+    cache_parent: Path | None = None,
 ) -> Path:
     """Write ``manifest.json`` under a fingerprinted directory; return manifest path."""
-    base = cache_root or DEFAULT_CACHE_ROOT
+    base = cache_parent if cache_parent is not None else DEFAULT_CACHE_ROOT
     short = fingerprint[:24]
     safe_adapter = "".join(c if c.isalnum() else "_" for c in adapter_id)
     dest = base / f"{safe_adapter}_{short}"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -54,7 +54,6 @@ def validate_depth_pairs(root: Path, *, max_check: int = 60) -> dict[str, Any]:
 
     row_counts = {"pairs_estimated": len(rgb_files)}
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="depth_pairs",
@@ -69,4 +68,4 @@ def validate_depth_pairs(root: Path, *, max_check: int = 60) -> dict[str, Any]:
             "missing_sample": missing,
         },
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

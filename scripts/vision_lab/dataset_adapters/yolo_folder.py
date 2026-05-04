@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
@@ -42,13 +42,12 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
 
     if images_dir is None:
         p = AdapterPartialReport(
-            valid=False,
             errors=[f"No image files found under {root} (expected images/train or images/)."],
             adapter_id="yolo_folder",
             dataset_schema_kind="detection",
             required_fields=["images/", "labels/*.txt"],
         )
-        return finalize_local_report(p)
+        return to_validation_report(p)
 
     labels_dir = None
     if (root / "labels").is_dir():
@@ -111,7 +110,6 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
     }
 
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="yolo_folder",
@@ -123,4 +121,4 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
         row_counts=row_counts,
         inspection=inspection,
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

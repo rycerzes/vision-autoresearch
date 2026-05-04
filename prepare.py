@@ -55,7 +55,19 @@ def main():
     parser.add_argument(
         "--no-cache-manifest",
         action="store_true",
-        help="Do not write .runtime/datasets manifest after successful local validation",
+        help="Do not write dataset cache manifest after successful local validation",
+    )
+    parser.add_argument(
+        "--cache-root",
+        type=Path,
+        default=None,
+        help="Explicit directory for dataset cache manifests (overrides --run-output-dir)",
+    )
+    parser.add_argument(
+        "--run-output-dir",
+        type=Path,
+        default=None,
+        help="Write cache manifest under <dir>/dataset (also via env VISION_RUN_OUTPUT_DIR)",
     )
     args = parser.parse_args()
 
@@ -69,6 +81,8 @@ def main():
         num_samples=NUM_INSPECT_SAMPLES_DEFAULT,
         adapter_id=args.adapter,
         write_cache=not args.no_cache_manifest,
+        run_output_dir=args.run_output_dir,
+        cache_root=args.cache_root,
     )
 
     if args.json_output:
@@ -79,9 +93,9 @@ def main():
 
     print(f"  Adapter: {result.get('adapter_id', '?')}")
     print(f"  Schema kind: {result.get('dataset_schema_kind', '?')}")
-    print(f"  Config: {result['config']}")
-    print(f"  Columns: {result['columns']}")
-    print(f"  Rows: {result['num_rows']}")
+    print(f"  Dataset config (HF subset): {result.get('dataset_config')}")
+    print(f"  Columns: {result.get('columns')}")
+    print(f"  Row counts: {result.get('row_counts')}")
     if result.get("compatible_tasks"):
         print(f"  Compatible tasks: {result['compatible_tasks']}")
 

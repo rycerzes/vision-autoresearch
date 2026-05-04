@@ -145,7 +145,7 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
             )
         )
 
-    tb_raw = block.get("tie_breakers") or block.get("tie_breaker") or []
+    tb_raw = block.get("tie_breakers") or []
     if isinstance(tb_raw, str):
         tb_raw = [tb_raw]
     if not isinstance(tb_raw, list):

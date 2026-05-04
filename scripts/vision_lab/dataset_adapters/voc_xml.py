@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 
 def validate_voc_xml(root: Path, *, max_xml: int = 60) -> dict[str, Any]:
@@ -49,7 +49,6 @@ def validate_voc_xml(root: Path, *, max_xml: int = 60) -> dict[str, Any]:
     row_counts = {"train": total_xml}
 
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="voc_xml",
@@ -65,4 +64,4 @@ def validate_voc_xml(root: Path, *, max_xml: int = 60) -> dict[str, Any]:
             "warnings": warnings,
         },
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

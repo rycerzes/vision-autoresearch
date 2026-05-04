@@ -9,7 +9,7 @@ from typing import Any
 from datasets import get_dataset_config_names, load_dataset
 from huggingface_hub import dataset_info
 
-from vision_lab.dataset_contracts import AdapterPartialReport, partial_from_legacy_hf
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 NUM_INSPECT_SAMPLES_DEFAULT = 5
 
@@ -336,7 +336,6 @@ def validate_hf_hub(
         elif configs:
             config = configs[0]
 
-    loader_errors: list[str] = []
     try:
         slice_split = f"{split}[:{num_samples}]"
         ds = load_dataset(dataset_name, config, split=slice_split, streaming=False)
@@ -352,31 +351,26 @@ def validate_hf_hub(
                     break
             features = ds.features
         except Exception as e:
-            return partial_from_legacy_hf(
-                adapter_id="hf_hub",
-                schema_kind=dataset_schema_kind,
-                valid=False,
+            p = AdapterPartialReport(
                 errors=[f"Failed to load dataset: {e}"],
-                columns=[],
-                inspection=None,
-                config=config,
-                num_rows=0,
-                split=split,
+                adapter_id="hf_hub",
+                dataset_schema_kind=dataset_schema_kind,
             )
+            return to_validation_report(p, dataset_config=config)
 
     column_names = list(features.keys())
     errors = validator(features, dataset_name)
 
+    num_rows = -1
     try:
         info = dataset_info(dataset_name, config)
-        num_rows = 0
         if info.splits:
             for s in info.splits.values():
                 if s.name == split:
                     num_rows = s.num_examples
                     break
     except Exception:
-        num_rows = -1
+        pass
 
     inspection = None
     if inspect and samples:
@@ -384,18 +378,20 @@ def validate_hf_hub(
         if inspector:
             inspection = inspector(samples, features)
 
-    valid = len(errors) == 0
-    return partial_from_legacy_hf(
+    row_counts: dict[str, int] = {}
+    if num_rows >= 0:
+        row_counts[split] = num_rows
+
+    p = AdapterPartialReport(
+        errors=list(errors),
         adapter_id="hf_hub",
-        schema_kind=dataset_schema_kind,
-        valid=valid,
-        errors=errors + loader_errors,
-        columns=column_names,
+        dataset_schema_kind=dataset_schema_kind,
+        required_fields=list(column_names),
+        columns=list(column_names),
         inspection=inspection,
-        config=config,
-        num_rows=num_rows,
-        split=split,
+        row_counts=row_counts,
     )
+    return to_validation_report(p, dataset_config=config)
 
 
 def run_hf_hub_adapter(
@@ -409,17 +405,12 @@ def run_hf_hub_adapter(
     task_by_id: dict,
 ) -> dict[str, Any]:
     if task_type not in task_by_id:
-        return partial_from_legacy_hf(
-            adapter_id="hf_hub",
-            schema_kind="unknown",
-            valid=False,
+        p = AdapterPartialReport(
             errors=[f"Unknown task type: {task_type}"],
-            columns=[],
-            inspection=None,
-            config=config,
-            num_rows=0,
-            split=split,
+            adapter_id="hf_hub",
+            dataset_schema_kind="unknown",
         )
+        return to_validation_report(p, dataset_config=config)
     schema_kind = task_by_id[task_type].dataset_schema_kind
     vals = validators_for_tasks(task_by_id)
     insp = inspectors_for_tasks(task_by_id)

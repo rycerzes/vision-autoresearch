@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
-
 from .semantic_masks import validate_semantic_masks  # reuse layout
 
 

@@ -89,7 +89,7 @@ use_albumentations (detect), prompt_type (segment)
 ├── train_classify.py          # stable — do not edit
 ├── train_detect.py            # stable — do not edit
 ├── train_segment.py           # stable — do not edit
-├── prepare.py                 # dataset validation — do not edit
+├── prepare.py                 # dataset validation CLI (vision_lab.dataset_validation)
 ├── scripts/
 │   ├── refresh_master.py      # restore config from promoted master
 │   ├── run_local.py           # local GPU execution

@@ -10,9 +10,9 @@ on a given dataset with disciplined, comparable single-change experiments.
 
 ## Hard Rules
 
-- Edit config YAMLs only, never training scripts (`train_detect.py`,
-  `train_ultralytics.py`, `train_classify.py`, `train_segment.py`).
-- Never modify `prepare.py`.
+- During **benchmark experiments**, edit **config YAMLs only** — never training scripts (`train_detect.py`,
+  `train_ultralytics.py`, `train_classify.py`, `train_segment.py`). Do not fold orchestration or `prepare.py`
+  changes into an experiment PR unless you are explicitly doing infrastructure work.
 - Start from the current local promoted master config, not stale local history.
 - Treat `research/live/master.json`, `research/results.tsv`, and the base
   config YAMLs in `configs/` as the benchmark source of truth.
@@ -60,6 +60,13 @@ such as:
   **`direction`** default from `scripts/vision_lab/task_registry.py` and
   `scripts/vision_lab/metrics.py`. The key `promotion_metric` is not supported.
   Metrics JSON artifacts are written under `research/runs/<run_id>/metrics.json`.
+
+Optional **dataset wiring** (preflight + `prepare.py`):
+
+- `dataset_adapter`: `auto` (default), `hf_hub`, or a filesystem adapter id (`coco_json`, `yolo_folder`, `voc_xml`, `semantic_masks`, `sam_prompt_mask`, `video_folder`, `ocr_table`, `depth_pairs`, `image_pairs`). Must match the task’s schema kind (see `scripts/vision_lab/dataset_contracts.py`).
+- `dataset_root`: optional local root validated before launch when the path exists on this machine.
+- `dataset_split`: optional split name passed through local validation (default `train`).
+- Dataset cache manifests: default `.runtime/datasets/`; set `VISION_RUN_OUTPUT_DIR` or `prepare.py --run-output-dir` to use `<dir>/dataset/` instead.
 
 For **YOLO-family tasks** (`*_yolo`), use **`train_ultralytics.py`** only (set `task_type` in YAML).
 Ultralytics is the trainer. Use the top-level YAML mapping `ultralytics_train` to pass
@@ -114,7 +121,7 @@ Per experiment:
 ## Local Runner
 
 For local GPU execution:
-- `uv run scripts/run_local.py --task <task> --config <config-path>`
+- `uv run scripts/run_local.py --task <task> --config <config-path>` (shared preflight with HF Jobs; `--skip-preflight` to bypass)
 
 ## Standard Workflow
 
@@ -122,7 +129,7 @@ For local GPU execution:
    - `uv run scripts/refresh_master.py`
 2. Edit config YAML (one change only).
 3. Validate dataset:
-   - `uv run prepare.py --dataset <name> --task <task> --split train`
+   - `uv run prepare.py --dataset <hub_id_or_path> --task <task> --split train` (optional `--adapter`, `--run-output-dir`)
 4. Launch benchmark:
    - `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
    - `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
@@ -137,7 +144,7 @@ For local GPU execution:
 - `configs/` — base and experiment config YAMLs (the experiment surface).
 - `train_detect.py`, `train_ultralytics.py`,
   `train_classify.py`, `train_segment.py` — stable training scripts (do not edit during experiments).
-- `prepare.py` — dataset validation (never edit).
+- `prepare.py` — dataset validation CLI (`vision_lab.dataset_validation`); lives at repo root.
 - `research/results.tsv` — append-only local run ledger.
 - `research/runs/` — per-run `metrics.json` artifacts (written by `submit_patch.py`).
 - `research/live/` — current local promoted master and DAG.

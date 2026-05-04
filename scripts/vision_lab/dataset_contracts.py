@@ -1,11 +1,11 @@
-"""Dataset adapter contracts: schema kinds, compatibility, and report merging."""
+"""Dataset adapter contracts: schema kinds and canonical validation reports."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from vision_lab.task_registry import TASK_BY_ID, all_task_ids
+from vision_lab.task_registry import TASK_BY_ID
 
 # Primary HF-style schema kinds used by TaskSpec.dataset_schema_kind
 KNOWN_SCHEMA_KINDS = frozenset({"detection", "classification", "segmentation"})
@@ -67,11 +67,18 @@ def preflight_adapter_matches_task(adapter_id: str, task_id: str) -> tuple[bool,
     return True, None
 
 
+def compatible_tasks_for_schema_kind(kind: str) -> list[str]:
+    if kind in EXTENDED_SCHEMA_KINDS:
+        return []
+    if kind in KNOWN_SCHEMA_KINDS:
+        return tasks_compatible_with_schema_kind(kind)
+    return []
+
+
 @dataclass
 class AdapterPartialReport:
-    """Normalized adapter output before merging into the CLI JSON payload."""
+    """Normalized adapter output before exporting the public validation dict."""
 
-    valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     adapter_id: str = ""
@@ -85,95 +92,28 @@ class AdapterPartialReport:
     inspection: dict[str, Any] | None = None
 
 
-def merge_hf_legacy_payload(partial: AdapterPartialReport, legacy: dict[str, Any]) -> dict[str, Any]:
-    """Merge adapter partial with legacy HF-only keys for backward compatibility."""
-    kind = partial.dataset_schema_kind
-    if kind in EXTENDED_SCHEMA_KINDS:
-        compatible: list[str] = []
-    elif kind in KNOWN_SCHEMA_KINDS:
-        compatible = tasks_compatible_with_schema_kind(kind)
-    else:
-        compatible = sorted(all_task_ids())
-    row_counts = dict(partial.row_counts)
-    num_rows = legacy.get("num_rows", -1)
-    split = legacy.get("_split", "train")
-    if num_rows >= 0 and split:
-        row_counts.setdefault(split, num_rows)
-
-    out: dict[str, Any] = {
-        "valid": partial.valid and len(partial.errors) == 0,
-        "errors": list(partial.errors) + [e for e in legacy.get("errors", []) if e],
+def to_validation_report(
+    partial: AdapterPartialReport,
+    *,
+    dataset_config: str | None = None,
+    cache_manifest_path: str | None = None,
+) -> dict[str, Any]:
+    """Single canonical shape for ``validate_dataset`` / CLI JSON."""
+    deduped_errors = list(dict.fromkeys(partial.errors))
+    return {
+        "valid": len(deduped_errors) == 0,
+        "errors": deduped_errors,
         "warnings": list(partial.warnings),
         "adapter_id": partial.adapter_id,
         "dataset_schema_kind": partial.dataset_schema_kind,
-        "compatible_tasks": compatible,
+        "compatible_tasks": compatible_tasks_for_schema_kind(partial.dataset_schema_kind),
         "required_fields": list(partial.required_fields),
         "detected_class_names": list(partial.detected_class_names),
         "label_remapping": dict(partial.label_remapping),
         "splits": dict(partial.splits),
-        "row_counts": row_counts,
+        "row_counts": dict(partial.row_counts),
         "columns": list(partial.columns),
-        "num_rows": num_rows,
-        "config": legacy.get("config"),
-        "inspection": partial.inspection if partial.inspection is not None else legacy.get("inspection"),
-        "cache_manifest_path": legacy.get("cache_manifest_path"),
-    }
-    # De-duplicate errors while preserving order
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for e in out["errors"]:
-        if e not in seen:
-            seen.add(e)
-            deduped.append(e)
-    out["errors"] = deduped
-    out["valid"] = len(out["errors"]) == 0
-    return out
-
-
-def finalize_local_report(partial: AdapterPartialReport, *, split: str = "train") -> dict[str, Any]:
-    """Convert a local adapter partial into the public ``validate_dataset`` dict shape."""
-    num_rows = partial.row_counts.get(split, -1)
-    if num_rows < 0 and partial.row_counts:
-        num_rows = next(iter(partial.row_counts.values()))
-    legacy = {
-        "errors": [],
-        "num_rows": num_rows,
-        "config": None,
-        "_split": split,
+        "dataset_config": dataset_config,
         "inspection": partial.inspection,
-        "columns": partial.columns,
+        "cache_manifest_path": cache_manifest_path,
     }
-    return merge_hf_legacy_payload(partial, legacy)
-
-
-def partial_from_legacy_hf(
-    *,
-    adapter_id: str,
-    schema_kind: str,
-    valid: bool,
-    errors: list[str],
-    columns: list[str],
-    inspection: dict[str, Any] | None,
-    config: str | None,
-    num_rows: int,
-    split: str,
-) -> dict[str, Any]:
-    """Build full validation dict for HF Hub path (legacy shape extended)."""
-    p = AdapterPartialReport(
-        valid=valid,
-        errors=list(errors),
-        adapter_id=adapter_id,
-        dataset_schema_kind=schema_kind,
-        required_fields=list(columns),
-        columns=list(columns),
-        inspection=inspection,
-    )
-    legacy = {
-        "errors": [],
-        "num_rows": num_rows,
-        "config": config,
-        "_split": split,
-        "inspection": inspection,
-        "columns": columns,
-    }
-    return merge_hf_legacy_payload(p, legacy)

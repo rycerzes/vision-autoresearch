@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,7 +16,11 @@ from vision_lab.dataset_adapters.semantic_masks import validate_semantic_masks
 from vision_lab.dataset_adapters.video_folder import validate_video_folder
 from vision_lab.dataset_adapters.voc_xml import validate_voc_xml
 from vision_lab.dataset_adapters.yolo_folder import validate_yolo_folder
-from vision_lab.dataset_cache import fingerprint_local_tree, write_cache_manifest
+from vision_lab.dataset_cache import (
+    fingerprint_local_tree,
+    resolve_dataset_cache_parent,
+    write_cache_manifest,
+)
 from vision_lab.dataset_contracts import ADAPTER_SCHEMA_KIND, EXTENDED_SCHEMA_KINDS
 from vision_lab.task_registry import TASK_BY_ID
 
@@ -128,6 +133,8 @@ def validate_dataset(
     *,
     adapter_id: str = "auto",
     write_cache: bool = True,
+    run_output_dir: Path | str | None = None,
+    cache_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """
     Validate dataset for ``task_type``.
@@ -137,6 +144,10 @@ def validate_dataset(
 
     Extended report keys: ``adapter_id``, ``dataset_schema_kind``, ``compatible_tasks``, ``warnings``,
     ``cache_manifest_path`` (optional).
+
+    Local validation caches a manifest under ``.runtime/datasets/`` by default, under
+    ``<run_output_dir>/dataset`` when ``run_output_dir`` or env ``VISION_RUN_OUTPUT_DIR``
+    is set, or under ``cache_root`` when given (highest priority).
     """
     src = Path(dataset_name).expanduser()
     local_ok = src.exists()
@@ -160,8 +171,7 @@ def validate_dataset(
             "splits": {},
             "row_counts": {},
             "columns": [],
-            "num_rows": 0,
-            "config": config,
+            "dataset_config": config,
             "inspection": None,
             "cache_manifest_path": None,
         }
@@ -198,8 +208,7 @@ def validate_dataset(
             "splits": {},
             "row_counts": {},
             "columns": [],
-            "num_rows": -1,
-            "config": config,
+            "dataset_config": config,
             "inspection": {"hint": "Try explicit --adapter or organize files per dataset_adapters modules."},
             "cache_manifest_path": None,
         }
@@ -218,8 +227,7 @@ def validate_dataset(
             "splits": {},
             "row_counts": {},
             "columns": [],
-            "num_rows": -1,
-            "config": config,
+            "dataset_config": config,
             "inspection": None,
             "cache_manifest_path": None,
         }
@@ -236,6 +244,15 @@ def validate_dataset(
         try:
             fp_base = src if src.is_dir() else src.parent
             fp = fingerprint_local_tree(fp_base)
+            ro = (
+                run_output_dir
+                if run_output_dir is not None
+                else os.environ.get("VISION_RUN_OUTPUT_DIR")
+            )
+            cache_parent = resolve_dataset_cache_parent(
+                run_output_dir=ro,
+                explicit_cache_root=cache_root,
+            )
             manifest_path = write_cache_manifest(
                 source_path=fp_base,
                 adapter_id=resolved,
@@ -245,6 +262,7 @@ def validate_dataset(
                     "row_counts": report.get("row_counts"),
                     "compatible_tasks": report.get("compatible_tasks"),
                 },
+                cache_parent=cache_parent,
             )
             report["cache_manifest_path"] = str(manifest_path)
         except OSError:

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 
 def find_coco_json(root: Path) -> Path | None:
@@ -31,33 +31,30 @@ def validate_coco_json(root: Path, *, inspect_sample_images: int = 5) -> dict[st
 
     if json_path is None or not json_path.is_file():
         p = AdapterPartialReport(
-            valid=False,
             errors=[f"No COCO-style instances*.json or annotations.json under {root}"],
             adapter_id="coco_json",
             dataset_schema_kind="detection",
             required_fields=["images", "annotations", "categories"],
         )
-        return finalize_local_report(p)
+        return to_validation_report(p)
 
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         p = AdapterPartialReport(
-            valid=False,
             errors=[f"Failed to read COCO JSON {json_path}: {e}"],
             adapter_id="coco_json",
             dataset_schema_kind="detection",
         )
-        return finalize_local_report(p)
+        return to_validation_report(p)
 
     if not isinstance(data, dict):
         p = AdapterPartialReport(
-            valid=False,
             errors=["COCO JSON root must be an object"],
             adapter_id="coco_json",
             dataset_schema_kind="detection",
         )
-        return finalize_local_report(p)
+        return to_validation_report(p)
 
     req = ("images", "annotations", "categories")
     missing = [k for k in req if k not in data]
@@ -117,7 +114,6 @@ def validate_coco_json(root: Path, *, inspect_sample_images: int = 5) -> dict[st
     }
 
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="coco_json",
@@ -129,4 +125,4 @@ def validate_coco_json(root: Path, *, inspect_sample_images: int = 5) -> dict[st
         row_counts=row_counts,
         inspection=inspection,
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

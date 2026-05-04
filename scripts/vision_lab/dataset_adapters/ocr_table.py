@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vision_lab.dataset_contracts import AdapterPartialReport, finalize_local_report
+from vision_lab.dataset_contracts import AdapterPartialReport, to_validation_report
 
 _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 
@@ -89,7 +89,6 @@ def validate_ocr_table(root: Path, *, max_rows: int = 80) -> dict[str, Any]:
     row_counts = {"images": len(imgs), "gt_rows_sampled": rows}
 
     p = AdapterPartialReport(
-        valid=len(errors) == 0,
         errors=errors,
         warnings=warnings,
         adapter_id="ocr_table",
@@ -103,4 +102,4 @@ def validate_ocr_table(root: Path, *, max_rows: int = 80) -> dict[str, Any]:
             "warnings": warnings,
         },
     )
-    return finalize_local_report(p)
+    return to_validation_report(p)

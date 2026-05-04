@@ -6,8 +6,7 @@ local promoted master and a git-tracked run ledger.
 Core rules:
 
 - use `uv`
-- edit config YAMLs only, never training scripts
-- never edit `prepare.py`
+- for benchmark experiments, edit config YAMLs only — do not change training scripts (`train_*.py`) or lab orchestration as part of a hypothesis
 - refresh from the current local promoted master before a fresh experiment:
   `uv run scripts/refresh_master.py`
 - treat `research/live/master.json` and `research/results.tsv` as the
@@ -21,8 +20,8 @@ Primary workflow:
 1. `uv sync`
 2. `uv run scripts/refresh_master.py`
 3. edit config YAML (one knob change)
-4. `uv run prepare.py --dataset <name> --task <task> --split train`
-5. `uv run scripts/hf_job.py preflight --task <task>`
+4. `uv run prepare.py --dataset <name_or_path> --task <task> --split train` (optional `--adapter`, `--run-output-dir`; manifests default to `.runtime/datasets/` or `<run>/dataset/`)
+5. `uv run scripts/hf_job.py preflight --task <task>` (checks task ↔ `task_type`, promotion block, model backend, optional `dataset_adapter` / local `dataset_root`)
 6. `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 7. `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
 8. `uv run scripts/parse_metric.py /tmp/vision-run.log`
@@ -42,4 +41,4 @@ Supported tasks:
 
 Local execution:
 
-- `uv run scripts/run_local.py --task <task> --config <config-path>`
+- `uv run scripts/run_local.py --task <task> --config <config-path>` (runs the same preflight as HF Jobs unless `--skip-preflight`)

@@ -8,6 +8,7 @@ from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
+from vision_lab.dataset_validation import all_adapter_ids_cli
 from vision_lab.task_registry import all_task_ids
 
 from prepare import validate_dataset
@@ -27,11 +28,24 @@ def main():
     )
     val_parser.add_argument("--split", default="train")
     val_parser.add_argument("--config", default=None)
+    val_parser.add_argument(
+        "--adapter",
+        default="auto",
+        choices=list(all_adapter_ids_cli()),
+        help="Dataset adapter (see prepare.py)",
+    )
 
     args = parser.parse_args()
 
     if args.command == "validate":
-        result = validate_dataset(args.dataset, args.task, args.split, args.config)
+        result = validate_dataset(
+            args.dataset,
+            args.task,
+            args.split,
+            args.config,
+            adapter_id=args.adapter,
+            write_cache=False,
+        )
         if result["valid"]:
             print(f"[OK] {args.dataset} is valid for {args.task}")
         else:

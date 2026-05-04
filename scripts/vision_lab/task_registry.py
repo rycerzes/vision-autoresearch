@@ -17,7 +17,7 @@ class TaskSpec:
     default_promotion_metric: str
     """Metric name as emitted in ``VISION AUTORESEARCH SUMMARY`` / submit row."""
     dataset_schema_kind: str
-    """Which ``prepare.py`` HF-dataset column contract applies: detection, segmentation, or classification."""
+    """Which HF dataset column contract applies: detection, segmentation, or classification (see ``vision_lab.dataset_validation``)."""
 
 
 _TASKS: tuple[TaskSpec, ...] = (

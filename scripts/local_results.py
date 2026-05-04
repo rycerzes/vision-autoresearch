@@ -11,6 +11,10 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# vision_lab lives next to this file under scripts/vision_lab
+from vision_lab.metrics import PROMOTION_METRICS_HIGHER
+
 RESEARCH_DIR = ROOT / "research"
 LIVE_DIR = RESEARCH_DIR / "live"
 REFERENCE_DIR = RESEARCH_DIR / "reference"
@@ -52,8 +56,8 @@ RESULTS_COLUMNS = [
     "comment",
 ]
 
-# All vision metrics are higher-is-better
-HIGHER_IS_BETTER_METRICS = {"mAP", "mAP_50", "accuracy", "iou", "dice"}
+# Scalar promotion targets that use strict greater-than comparison today.
+HIGHER_IS_BETTER_METRICS = PROMOTION_METRICS_HIGHER
 
 
 def now_utc_iso() -> str:

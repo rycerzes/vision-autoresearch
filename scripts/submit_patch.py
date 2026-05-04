@@ -36,35 +36,14 @@ from local_results import (
     write_results_rows,
 )
 from parse_metric import parse_summary
+from vision_lab.task_registry import all_task_ids, promotion_metric_for_task
 import yaml
 
 
 RUNTIME_DIR = ROOT / ".runtime"
 LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
 
-METRIC_FOR_TASK = {
-    "detect": "mAP",
-    "detect_yolo": "mAP",
-    "track_yolo": "mAP",
-    "segment_yolo": "iou",
-    "classify_yolo": "accuracy",
-    "pose_yolo": "mAP",
-    "obb_yolo": "mAP",
-    "classify": "accuracy",
-    "segment": "iou",
-}
-
-_SUBMIT_TASK_CHOICES = [
-    "detect",
-    "classify",
-    "segment",
-    "detect_yolo",
-    "track_yolo",
-    "segment_yolo",
-    "classify_yolo",
-    "pose_yolo",
-    "obb_yolo",
-]
+_SUBMIT_TASK_CHOICES = list(all_task_ids())
 
 
 def env_context() -> dict[str, str]:
@@ -172,9 +151,10 @@ def main() -> int:
     if not task_type:
         raise SystemExit("Could not determine task_type; pass --task explicitly")
 
-    promotion_metric = METRIC_FOR_TASK.get(task_type)
-    if not promotion_metric:
-        raise SystemExit(f"Unknown task type: {task_type}")
+    try:
+        promotion_metric = promotion_metric_for_task(task_type)
+    except KeyError:
+        raise SystemExit(f"Unknown task type: {task_type}") from None
 
     config_path = resolve_config_path(
         task_type, str(args.config) if args.config else None

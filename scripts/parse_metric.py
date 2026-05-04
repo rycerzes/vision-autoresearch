@@ -9,43 +9,29 @@ import re
 import sys
 from pathlib import Path
 
-
-SUMMARY_KEYS = {
-    "task_type",
-    "mAP",
-    "mAP_50",
-    "mAR",
-    "accuracy",
-    "iou",
-    "dice",
-    "training_seconds",
-    "peak_vram_mb",
-    "train_loss",
-    "num_train_epochs",
-}
-
-NUMERIC_KEYS = {
-    "mAP",
-    "mAP_50",
-    "mAR",
-    "accuracy",
-    "iou",
-    "dice",
-    "training_seconds",
-    "peak_vram_mb",
-    "train_loss",
-    "num_train_epochs",
-}
+from vision_lab.summary_schema import (
+    NUMERIC_SUMMARY_KEYS,
+    STRING_SUMMARY_KEYS,
+    accept_summary_line_key,
+)
 
 
-def coerce_value(raw: str, key: str) -> int | float | str:
+def coerce_summary_value(raw: str, key: str) -> int | float | str:
     raw = raw.strip()
-    if key in NUMERIC_KEYS:
+    if key in STRING_SUMMARY_KEYS:
+        return raw
+    if key in NUMERIC_SUMMARY_KEYS:
         for caster in (int, float):
             try:
                 return caster(raw)
             except ValueError:
                 continue
+        return raw
+    for caster in (int, float):
+        try:
+            return caster(raw)
+        except ValueError:
+            continue
     return raw
 
 
@@ -64,8 +50,9 @@ def parse_summary(text: str) -> dict[str, int | float | str]:
         match = re.match(r"^([A-Za-z_0-9]+):\s+(.+)$", stripped)
         if match:
             key, value = match.groups()
-            if key in SUMMARY_KEYS:
-                metrics[key] = coerce_value(value, key)
+            if not accept_summary_line_key(key):
+                continue
+            metrics[key] = coerce_summary_value(value, key)
     return metrics
 
 

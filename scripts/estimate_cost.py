@@ -11,6 +11,8 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from vision_lab.task_registry import ESTIMATED_MINUTES_BY_TASK, all_task_ids
 
 GPU_HOURLY_RATES = {
     "l4": 0.89,
@@ -18,18 +20,6 @@ GPU_HOURLY_RATES = {
     "a100": 3.72,
     "a100-80gb": 5.00,
     "t4": 0.60,
-}
-
-ESTIMATED_MINUTES = {
-    "detect": {"small": 15, "medium": 45, "large": 120},
-    "detect_yolo": {"small": 15, "medium": 45, "large": 120},
-    "track_yolo": {"small": 15, "medium": 45, "large": 120},
-    "pose_yolo": {"small": 20, "medium": 50, "large": 130},
-    "obb_yolo": {"small": 20, "medium": 50, "large": 130},
-    "segment_yolo": {"small": 20, "medium": 55, "large": 150},
-    "classify_yolo": {"small": 10, "medium": 30, "large": 90},
-    "classify": {"small": 10, "medium": 30, "large": 90},
-    "segment": {"small": 20, "medium": 60, "large": 180},
 }
 
 DATASET_SIZE_THRESHOLDS = {
@@ -66,7 +56,9 @@ def estimate(task: str, config_path: Path, flavor: str = "l4") -> dict:
     grad_accum = int(config.get("gradient_accumulation_steps", 1))
 
     size_category = estimate_dataset_size(dataset_name)
-    base_minutes = ESTIMATED_MINUTES.get(task, ESTIMATED_MINUTES["detect"]).get(size_category, 45)
+    base_minutes = ESTIMATED_MINUTES_BY_TASK.get(task, ESTIMATED_MINUTES_BY_TASK["detect"]).get(
+        size_category, 45
+    )
 
     epoch_factor = epochs / 10.0
     batch_factor = 8.0 / (batch_size * grad_accum)
@@ -97,17 +89,7 @@ def main() -> int:
     parser.add_argument(
         "--task",
         required=True,
-        choices=[
-            "detect",
-            "detect_yolo",
-            "track_yolo",
-            "segment_yolo",
-            "classify_yolo",
-            "pose_yolo",
-            "obb_yolo",
-            "classify",
-            "segment",
-        ],
+        choices=list(all_task_ids()),
     )
     parser.add_argument("--config", type=Path, help="Config YAML path")
     parser.add_argument("--flavor", default="l4", choices=list(GPU_HOURLY_RATES.keys()))

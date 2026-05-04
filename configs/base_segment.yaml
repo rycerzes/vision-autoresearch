@@ -47,8 +47,11 @@ load_best_model_at_end: true
 metric_for_best_model: eval_iou
 greater_is_better: true
 
-# Promotion metric
-promotion_metric: iou
+# Promotion (submit_patch ledger / local master)
+promotion:
+  primary: iou
+  direction: higher
+  min_delta: 0.0
 
 # Hub
 push_to_hub: false

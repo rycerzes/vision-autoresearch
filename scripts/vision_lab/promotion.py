@@ -75,71 +75,8 @@ def _default_direction_for_metric(metric: str) -> MetricDirection:
     return spec.direction
 
 
-def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> PromotionPolicy:
-    """Build policy from optional ``promotion:`` block and legacy ``promotion_metric``."""
-    if task_id not in TASK_BY_ID:
-        raise ValueError(f"Unknown task: {task_id!r}")
-    block = config_data.get("promotion")
-    legacy_primary = config_data.get("promotion_metric")
-
-    if isinstance(block, dict):
-        primary = block.get("primary")
-        if primary is None or str(primary).strip() == "":
-            primary = legacy_primary or promotion_metric_for_task(task_id)
-        primary = str(primary).strip()
-
-        dir_raw = block.get("direction")
-        if dir_raw is None or str(dir_raw).strip() == "":
-            direction = _default_direction_for_metric(primary)
-        else:
-            direction = MetricDirection(str(dir_raw).strip().lower())
-
-        min_delta_raw = block.get("min_delta", 0.0)
-        try:
-            min_delta = float(min_delta_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"promotion.min_delta must be numeric; got {min_delta_raw!r}") from exc
-
-        sec = block.get("secondary")
-        secondary = str(sec).strip() if sec not in (None, "") else None
-
-        gates_raw = block.get("gates") or []
-        if not isinstance(gates_raw, list):
-            raise ValueError("promotion.gates must be a list of mappings")
-        gates: list[GateSpec] = []
-        for i, g in enumerate(gates_raw):
-            if not isinstance(g, dict):
-                raise ValueError(f"promotion.gates[{i}] must be a mapping")
-            m = g.get("metric")
-            if not m:
-                raise ValueError(f"promotion.gates[{i}] missing metric")
-            gmin = g.get("min")
-            gmax = g.get("max")
-            gates.append(
-                GateSpec(
-                    metric=str(m).strip(),
-                    min=float(gmin) if gmin not in (None, "") else None,
-                    max=float(gmax) if gmax not in (None, "") else None,
-                )
-            )
-
-        tb_raw = block.get("tie_breakers") or block.get("tie_breaker") or []
-        if isinstance(tb_raw, str):
-            tb_raw = [tb_raw]
-        if not isinstance(tb_raw, list):
-            raise ValueError("promotion.tie_breakers must be a list of metric names")
-        tie_breakers = tuple(str(x).strip() for x in tb_raw if str(x).strip())
-
-        return PromotionPolicy(
-            primary=primary,
-            direction=direction,
-            min_delta=min_delta,
-            secondary=secondary,
-            gates=tuple(gates),
-            tie_breakers=tie_breakers,
-        )
-
-    primary = str(legacy_primary).strip() if legacy_primary else promotion_metric_for_task(task_id)
+def _task_default_policy(task_id: str) -> PromotionPolicy:
+    primary = promotion_metric_for_task(task_id)
     return PromotionPolicy(
         primary=primary,
         direction=_default_direction_for_metric(primary),
@@ -147,6 +84,81 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
         secondary=None,
         gates=(),
         tie_breakers=(),
+    )
+
+
+def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> PromotionPolicy:
+    """Build policy from optional ``promotion:`` block; otherwise task registry defaults."""
+    if task_id not in TASK_BY_ID:
+        raise ValueError(f"Unknown task: {task_id!r}")
+    if "promotion_metric" in config_data:
+        raise ValueError(
+            "Unsupported config key 'promotion_metric'. Use a top-level `promotion:` mapping "
+            "(see AGENTS.md), or omit it to use task defaults from vision_lab.task_registry."
+        )
+
+    block = config_data.get("promotion")
+    if block is None:
+        return _task_default_policy(task_id)
+    if not isinstance(block, dict):
+        raise ValueError("promotion must be a mapping when set")
+    if not block:
+        return _task_default_policy(task_id)
+
+    primary = block.get("primary")
+    if primary is None or str(primary).strip() == "":
+        primary = promotion_metric_for_task(task_id)
+    primary = str(primary).strip()
+
+    dir_raw = block.get("direction")
+    if dir_raw is None or str(dir_raw).strip() == "":
+        direction = _default_direction_for_metric(primary)
+    else:
+        direction = MetricDirection(str(dir_raw).strip().lower())
+
+    min_delta_raw = block.get("min_delta", 0.0)
+    try:
+        min_delta = float(min_delta_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"promotion.min_delta must be numeric; got {min_delta_raw!r}") from exc
+
+    sec = block.get("secondary")
+    secondary = str(sec).strip() if sec not in (None, "") else None
+
+    gates_raw = block.get("gates") or []
+    if not isinstance(gates_raw, list):
+        raise ValueError("promotion.gates must be a list of mappings")
+    gates: list[GateSpec] = []
+    for i, g in enumerate(gates_raw):
+        if not isinstance(g, dict):
+            raise ValueError(f"promotion.gates[{i}] must be a mapping")
+        m = g.get("metric")
+        if not m:
+            raise ValueError(f"promotion.gates[{i}] missing metric")
+        gmin = g.get("min")
+        gmax = g.get("max")
+        gates.append(
+            GateSpec(
+                metric=str(m).strip(),
+                min=float(gmin) if gmin not in (None, "") else None,
+                max=float(gmax) if gmax not in (None, "") else None,
+            )
+        )
+
+    tb_raw = block.get("tie_breakers") or block.get("tie_breaker") or []
+    if isinstance(tb_raw, str):
+        tb_raw = [tb_raw]
+    if not isinstance(tb_raw, list):
+        raise ValueError("promotion.tie_breakers must be a list of metric names")
+    tie_breakers = tuple(str(x).strip() for x in tb_raw if str(x).strip())
+
+    return PromotionPolicy(
+        primary=primary,
+        direction=direction,
+        min_delta=min_delta,
+        secondary=secondary,
+        gates=tuple(gates),
+        tie_breakers=tie_breakers,
     )
 
 

@@ -11,7 +11,9 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
 RESEARCH_DIR = ROOT / "research"
+RUNS_DIR = RESEARCH_DIR / "runs"
 LIVE_DIR = RESEARCH_DIR / "live"
 REFERENCE_DIR = RESEARCH_DIR / "reference"
 RESULTS_PATH = RESEARCH_DIR / "results.tsv"
@@ -40,6 +42,12 @@ RESULTS_COLUMNS = [
     "candidate_hash",
     "promotion_metric",
     "promotion_metric_value",
+    "promotion_baseline_value",
+    "promotion_delta",
+    "promotion_relative_delta",
+    "promotion_min_delta_met",
+    "promotion_gates_met",
+    "promotion_rerun_recommended",
     "mAP",
     "mAP_50",
     "accuracy",
@@ -51,9 +59,6 @@ RESULTS_COLUMNS = [
     "promoted",
     "comment",
 ]
-
-# All vision metrics are higher-is-better
-HIGHER_IS_BETTER_METRICS = {"mAP", "mAP_50", "accuracy", "iou", "dice"}
 
 
 def now_utc_iso() -> str:
@@ -125,12 +130,20 @@ def load_results_rows() -> list[dict[str, str]]:
         return []
     with RESULTS_PATH.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
-        if reader.fieldnames != RESULTS_COLUMNS:
-            raise RuntimeError(
-                f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
-                f"expected {RESULTS_COLUMNS}, got {reader.fieldnames}"
-            )
-        return [normalize_row(row) for row in reader]
+        fieldnames = tuple(reader.fieldnames or ())
+        if fieldnames == tuple(RESULTS_COLUMNS):
+            return [normalize_row(row) for row in reader]
+        raise RuntimeError(
+            f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
+            f"expected {RESULTS_COLUMNS}, got {reader.fieldnames}"
+        )
+
+
+def write_run_metrics_artifact(run_id: str, payload: dict[str, Any]) -> Path:
+    """Persist structured metrics + promotion evaluation under ``research/runs/<run_id>/``."""
+    out_path = RUNS_DIR / run_id / "metrics.json"
+    write_json(out_path, payload)
+    return out_path
 
 
 def write_results_rows(rows: list[dict[str, object]]) -> None:
@@ -202,14 +215,14 @@ def seed_row(task_type: str = "detect") -> dict[str, object]:
     content = seed_config_content(seed_task)
     c_hash = config_hash_from_text(content)
     return {
-        "run_id": "legacy_seed",
+        "run_id": "seed",
         "created_at": metadata.get("created_at") or now_utc_iso(),
-        "status": "legacy_seed",
+        "status": "seed",
         "job_id": metadata.get("job_id", ""),
         "task_type": seed_task,
         "backend": metadata.get("backend", "transformers"),
-        "campaign": "legacy-baseline",
-        "experiment_id": "legacy-seed",
+        "campaign": "baseline-seed",
+        "experiment_id": "seed",
         "worker_id": "seed",
         "hypothesis": f"seed local master from base_{seed_task}.yaml",
         "model_name": metadata.get("model_name", ""),
@@ -257,15 +270,6 @@ def current_promoted_row(
 def current_master_hash(rows: list[dict[str, str]] | None = None) -> str | None:
     row = current_promoted_row(rows)
     return row["candidate_hash"] if row else None
-
-
-def is_improvement(new_value: float, old_value: float | None, metric: str) -> bool:
-    """Check if new_value beats old_value. All vision metrics are higher-is-better."""
-    if old_value is None:
-        return True
-    if metric not in HIGHER_IS_BETTER_METRICS:
-        raise ValueError(f"Unknown metric: {metric}. Expected one of {HIGHER_IS_BETTER_METRICS}")
-    return new_value > old_value
 
 
 def build_master_snapshot(row: dict[str, str]) -> dict[str, Any]:

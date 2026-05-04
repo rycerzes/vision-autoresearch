@@ -16,6 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = ROOT / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from vision_lab.task_registry import all_task_ids, task_script_map
+
 RUNTIME_DIR = ROOT / ".runtime"
 LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
 HF_JOB_STATE_DIR = RUNTIME_DIR / "hf-jobs"
@@ -30,36 +36,8 @@ TERMINAL_JOB_STAGES = {
 }
 DEFAULT_NAMESPACE = os.environ.get("VISION_HF_NAMESPACE")
 
-_ULTRA_TASKS = (
-    "detect_yolo",
-    "track_yolo",
-    "segment_yolo",
-    "classify_yolo",
-    "pose_yolo",
-    "obb_yolo",
-)
-TASK_SCRIPTS = {
-    "detect": "train_detect.py",
-    "classify": "train_classify.py",
-    "segment": "train_segment.py",
-    **dict.fromkeys(_ULTRA_TASKS, "train_ultralytics.py"),
-}
-
-_CLI_TASKS = ["detect", "classify", "segment"] + list(_ULTRA_TASKS)
-
-SUMMARY_KEYS = {
-    "task_type",
-    "mAP",
-    "mAP_50",
-    "mAR",
-    "accuracy",
-    "iou",
-    "dice",
-    "training_seconds",
-    "peak_vram_mb",
-    "train_loss",
-    "num_train_epochs",
-}
+TASK_SCRIPTS = task_script_map()
+_CLI_TASKS = list(all_task_ids())
 
 
 def now_utc_iso() -> str:
@@ -119,30 +97,10 @@ def parse_job_id(text: str) -> str | None:
 
 
 def parse_metrics(text: str) -> dict | None:
-    metrics: dict = {}
-    in_summary = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if "VISION AUTORESEARCH SUMMARY" in stripped:
-            in_summary = True
-            continue
-        if "END SUMMARY" in stripped:
-            break
-        if not in_summary:
-            continue
-        match = re.match(r"^([A-Za-z_0-9]+):\s+(.+)$", stripped)
-        if match:
-            key, raw = match.groups()
-            if key in SUMMARY_KEYS:
-                value = raw.strip()
-                for caster in (int, float):
-                    try:
-                        value = caster(raw)
-                        break
-                    except ValueError:
-                        continue
-                metrics[key] = value
-    return metrics if metrics else None
+    from parse_metric import parse_summary
+
+    parsed = parse_summary(text)
+    return parsed if parsed else None
 
 
 def persist_job_state(state: dict) -> None:

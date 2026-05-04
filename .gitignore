@@ -227,3 +227,5 @@ trainer_output/
 outputs/
 
 *.pt
+
+tests/

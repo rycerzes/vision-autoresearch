@@ -33,7 +33,10 @@ save_strategy: epoch
 load_best_model_at_end: false
 greater_is_better: true
 
-promotion_metric: mAP
+promotion:
+  primary: mAP
+  direction: higher
+  min_delta: 0.0
 
 push_to_hub: false
 output_dir: ./outputs/track_yolo

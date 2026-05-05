@@ -6,25 +6,26 @@ Experiments modify config YAMLs only.
 Adapted from huggingface/skills huggingface-vision-trainer.
 """
 
+# pyright: reportPrivateImportUsage=false
+# PyTorch typings mark many public APIs (e.g. torch.tensor) as private re-exports.
+
 import logging
 import math
 import os
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import albumentations as A
 import numpy as np
 import torch
+import trackio
+import transformers
 from datasets import load_dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-
-import trackio
-
-import transformers
 from transformers import (
     AutoConfig,
     AutoImageProcessor,
@@ -33,9 +34,9 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-from transformers.image_processing_utils import BatchFeature
+from transformers.image_processing_base import BatchFeature
 from transformers.image_transforms import center_to_corners_format
-from transformers.trainer import EvalPrediction
+from transformers.trainer_utils import EvalPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +50,20 @@ class ModelOutput:
 
 
 def format_image_annotations_as_coco(
-    image_id: str, categories: list[int], areas: list[float], bboxes: list[tuple[float]]
-) -> dict:
+    image_id: str | int, categories: list[int], areas: list[float], bboxes: list[tuple[float]]
+) -> dict[str, Any]:
+    sid = str(image_id)
     annotations = []
     for category, area, bbox in zip(categories, areas, bboxes):
         formatted_annotation = {
-            "image_id": image_id,
+            "image_id": sid,
             "category_id": category,
             "iscrowd": 0,
             "area": area,
             "bbox": list(bbox),
         }
         annotations.append(formatted_annotation)
-    return {"image_id": image_id, "annotations": annotations}
+    return {"image_id": sid, "annotations": annotations}
 
 
 def detect_bbox_format_from_samples(dataset, image_col="image", objects_col="objects", num_samples=50):
@@ -154,13 +156,15 @@ def sanitize_dataset(dataset, bbox_format="xywh", image_col="image", objects_col
     return dataset
 
 
-def convert_bbox_yolo_to_pascal(boxes: torch.Tensor, image_size: tuple[int, int]) -> torch.Tensor:
-    boxes = center_to_corners_format(boxes)
+def convert_bbox_yolo_to_pascal(boxes: torch.Tensor, image_size: torch.Tensor | Sequence[int] | np.ndarray) -> torch.Tensor:
+    boxes = cast(torch.Tensor, center_to_corners_format(cast(Any, boxes)))
     if isinstance(image_size, torch.Tensor):
-        image_size = image_size.tolist()
+        hw = image_size.tolist()
     elif isinstance(image_size, np.ndarray):
-        image_size = image_size.tolist()
-    height, width = image_size
+        hw = image_size.tolist()
+    else:
+        hw = list(image_size)
+    height, width = int(hw[0]), int(hw[1])
     boxes = boxes * torch.tensor([[width, height, width, height]])
     return boxes
 
@@ -197,14 +201,15 @@ def augment_and_transform_batch(
         )
         annotations.append(formatted_annotations)
 
-    result = image_processor(images=images, annotations=annotations, return_tensors="pt")
+    processor_call = cast(Any, image_processor)
+    result = processor_call(images=images, annotations=annotations, return_tensors="pt")
     if not return_pixel_mask:
         result.pop("pixel_mask", None)
     return result
 
 
-def collate_fn(batch: list[BatchFeature]) -> Mapping[str, torch.Tensor | list[Any]]:
-    data = {}
+def collate_fn(batch: list[BatchFeature]) -> dict[str, torch.Tensor | list[Any]]:
+    data: dict[str, torch.Tensor | list[Any]] = {}
     data["pixel_values"] = torch.stack([x["pixel_values"] for x in batch])
     data["labels"] = [x["labels"] for x in batch]
     if "pixel_mask" in batch[0]:
@@ -237,7 +242,7 @@ def compute_metrics(
     for batch, target_sizes in zip(predictions, image_sizes):
         batch_logits, batch_boxes = batch[1], batch[2]
         output = ModelOutput(logits=torch.tensor(batch_logits), pred_boxes=torch.tensor(batch_boxes))
-        post_processed_output = image_processor.post_process_object_detection(
+        post_processed_output = cast(Any, image_processor).post_process_object_detection(
             output, threshold=threshold, target_sizes=target_sizes
         )
         post_processed_predictions.extend(post_processed_output)
@@ -344,7 +349,6 @@ def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, pe
     print("task_type: detect")
     print(f"mAP: {metrics.get('map', metrics.get('eval_map', 0.0))}")
     print(f"mAP_50: {metrics.get('map_50', metrics.get('eval_map_50', 0.0))}")
-    print(f"mAR: {metrics.get('mar_100', metrics.get('eval_mar_100', 0.0))}")
     print(f"training_seconds: {training_seconds:.1f}")
     print(f"peak_vram_mb: {peak_vram_mb:.0f}")
     print(f"train_loss: {train_metrics.get('train_loss', 0.0)}")
@@ -357,7 +361,7 @@ def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, pe
 def main():
     start_time = time.time()
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
     # Support: train_detect.py config.yaml | train_detect.py --arg1 val1 ...
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
@@ -444,7 +448,8 @@ def main():
     if categories is None:
         logger.info("Category feature is not ClassLabel -- scanning dataset to discover labels...")
         unique_cats = set()
-        for example in dataset["train"]:
+        for raw_row in dataset["train"]:
+            example = cast(dict[str, Any], raw_row)
             cats = example["objects"]["category"]
             if isinstance(cats, list):
                 unique_cats.update(cats)
@@ -570,9 +575,15 @@ def main():
     if "test" in dataset and eval_split != "test":
         dataset["test"] = dataset["test"].with_transform(validation_transform_batch)
 
-    eval_compute_metrics_fn = partial(
-        compute_metrics, image_processor=image_processor, id2label=id2label, threshold=0.0
-    )
+    def eval_compute_metrics_fn(eval_pred: EvalPrediction) -> dict[str, float]:
+        return dict(
+            compute_metrics(
+                eval_pred,
+                image_processor=image_processor,
+                threshold=0.0,
+                id2label=id2label,
+            )
+        )
 
     trainer = Trainer(
         model=model,
@@ -598,8 +609,10 @@ def main():
     eval_metrics = {}
     if training_args.do_eval:
         test_dataset = dataset.get("test", dataset.get("validation"))
+        if test_dataset is None:
+            raise RuntimeError("do_eval is True but no validation/test split exists")
         test_prefix = "test" if "test" in dataset else "eval"
-        eval_metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix=test_prefix)
+        eval_metrics = trainer.evaluate(eval_dataset=cast(Any, test_dataset), metric_key_prefix=test_prefix)
         trainer.log_metrics(test_prefix, eval_metrics)
         trainer.save_metrics(test_prefix, eval_metrics)
 

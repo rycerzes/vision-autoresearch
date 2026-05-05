@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import yaml
+
 from local_results import (
     CONFIGS_DIR,
     MASTER_DETAIL_PATH,
@@ -30,14 +32,13 @@ from local_results import (
 )
 from parse_metric import parse_summary
 from vision_lab.promotion import (
+    assert_summary_eligible_for_recording,
     evaluate_promotion,
     evaluation_to_jsonable,
     load_promotion_policy,
     policy_to_jsonable,
 )
 from vision_lab.task_registry import all_task_ids
-import yaml
-
 
 RUNTIME_DIR = ROOT / ".runtime"
 LAST_JOB_PATH = RUNTIME_DIR / "hf-job-last.json"
@@ -171,6 +172,15 @@ def main() -> int:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
+    try:
+        assert_summary_eligible_for_recording(
+            task_id=task_type,
+            policy=promotion_policy,
+            summary_metrics=metrics,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
     context = env_context()
     existing_rows = ensure_results_ledger(task_type)
     current_master = current_master_snapshot(existing_rows, task_type=task_type)
@@ -185,7 +195,7 @@ def main() -> int:
     promotion_metric = promotion_eval.primary
 
     candidate_value = parse_float(metrics.get(promotion_metric))
-    status = "completed" if candidate_value is not None else "missing_metric"
+    status = "completed"
 
     master_value = promotion_eval.baseline_value
 
@@ -218,8 +228,9 @@ def main() -> int:
         "promotion_rerun_recommended": stringify_field(promotion_eval.rerun_recommended),
         "mAP": metrics.get("mAP", ""),
         "mAP_50": metrics.get("mAP_50", ""),
+        "mask_map": metrics.get("mask_map", ""),
         "accuracy": metrics.get("accuracy", ""),
-        "iou": metrics.get("iou", ""),
+        "mIoU": metrics.get("mIoU", ""),
         "dice": metrics.get("dice", ""),
         "training_seconds": metrics.get("training_seconds", ""),
         "total_seconds": metrics.get("training_seconds", ""),

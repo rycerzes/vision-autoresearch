@@ -8,10 +8,8 @@ from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
-from vision_lab.dataset_validation import all_adapter_ids_cli
+from vision_lab.dataset_validation import all_adapter_ids_cli, validate_dataset
 from vision_lab.task_registry import all_task_ids
-
-from prepare import validate_dataset
 
 
 def main():

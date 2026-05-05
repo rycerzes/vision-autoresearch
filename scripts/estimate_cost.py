@@ -9,7 +9,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from vision_lab.task_registry import ESTIMATED_MINUTES_BY_TASK, all_task_ids

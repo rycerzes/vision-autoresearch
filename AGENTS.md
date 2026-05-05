@@ -5,7 +5,8 @@ master per task type.
 
 ## Goal
 
-Optimize the configured promotion metric (mAP, accuracy, IoU, Dice, or task-specific scalar)
+Optimize the configured promotion metric (task-specific **standard** names such as `mAP`, `mAP_50`,
+`mask_map`, `accuracy`, `mIoU`; see `scripts/vision_lab/metrics.py` and `task_registry.py`)
 on a given dataset with disciplined, comparable single-change experiments.
 
 ## Hard Rules
@@ -34,12 +35,12 @@ on a given dataset with disciplined, comparable single-change experiments.
 | `detect` | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
 | `detect_yolo` | `train_ultralytics.py` | `yolo26n.pt` (Ultralytics) | mAP |
 | `track_yolo` | `train_ultralytics.py` | `yolo26n.pt` | mAP (detector training for tracking) |
-| `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | mask mAP (`mAP_50`) |
+| `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | mask mAP (`mask_map`) |
 | `classify_yolo` | `train_ultralytics.py` | `yolo26n-cls.pt` | accuracy |
 | `pose_yolo` | `train_ultralytics.py` | `yolo26n-pose.pt` | mAP |
 | `obb_yolo` | `train_ultralytics.py` | `yolo26n-obb.pt` | mAP |
 | `classify` | `train_classify.py` | `google/vit-base-patch16-224` | accuracy |
-| `segment` | `train_segment.py` | `facebook/sam2.1-hiera-small` | IoU |
+| `segment` | `train_segment.py` | `facebook/sam2.1-hiera-small` | mIoU |
 
 ## Config YAML as Experiment Surface
 
@@ -115,7 +116,7 @@ Per experiment:
 - `uv run scripts/hf_job.py preflight --task <detect|detect_yolo|track_yolo|segment_yolo|classify_yolo|pose_yolo|obb_yolo|classify|segment>`
 - `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 - `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
-- `uv run scripts/parse_metric.py /tmp/vision-run.log`
+- `uv run scripts/parse_metric.py /tmp/vision-run.log` (optional: `--task <task> [--config <yaml>]` to validate the summary against the task promotion contract)
 - `uv run scripts/submit_patch.py --comment "..."`
 
 ## Local Runner
@@ -134,7 +135,7 @@ For local GPU execution:
    - `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
    - `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
 5. Parse the result:
-   - `uv run scripts/parse_metric.py /tmp/vision-run.log`
+   - `uv run scripts/parse_metric.py /tmp/vision-run.log` (optional: `--task` / `--config` to validate the summary contract before submit)
 6. Record the hypothesis and outcome in `research/notes.md`.
 7. Record the run locally:
    - `uv run scripts/submit_patch.py --comment "..."`

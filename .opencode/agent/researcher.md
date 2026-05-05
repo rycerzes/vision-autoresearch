@@ -19,7 +19,7 @@ Read before proposing work:
 - `research/live/master.json`
 - `research/live/dag.json`
 
-Supported tasks: detect (mAP), detect_yolo (mAP), classify (accuracy), segment (IoU).
+Supported tasks: detect (mAP), detect_yolo (mAP), track_yolo (mAP), segment_yolo (mask_map), classify_yolo (accuracy), pose_yolo (mAP), obb_yolo (mAP), classify (accuracy), segment (mIoU). See `AGENTS.md` for the canonical table.
 
 Rules:
 

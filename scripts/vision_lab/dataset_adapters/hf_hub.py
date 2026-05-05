@@ -358,17 +358,25 @@ def validate_hf_hub(
             )
             return to_validation_report(p, dataset_config=config)
 
+    if features is None:
+        p = AdapterPartialReport(
+            errors=["Dataset features unavailable after load"],
+            adapter_id="hf_hub",
+            dataset_schema_kind=dataset_schema_kind,
+        )
+        return to_validation_report(p, dataset_config=config)
+
     column_names = list(features.keys())
     errors = validator(features, dataset_name)
 
     num_rows = -1
     try:
-        info = dataset_info(dataset_name, config)
-        if info.splits:
-            for s in info.splits.values():
-                if s.name == split:
-                    num_rows = s.num_examples
-                    break
+        info = dataset_info(repo_id=dataset_name)
+        splits = getattr(info, "splits", None) or {}
+        for s in splits.values():
+            if getattr(s, "name", None) == split:
+                num_rows = int(getattr(s, "num_examples", -1) or -1)
+                break
     except Exception:
         pass
 

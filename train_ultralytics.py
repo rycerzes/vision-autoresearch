@@ -8,7 +8,7 @@ Entrypoint: **only** ``train_ultralytics.py`` for all ``*_yolo`` tasks (via conf
 Supported ``task_type`` values (default promotion primary in parentheses; see
 ``vision_lab.task_registry`` and ``vision_lab.metrics``):
 
-  detect_yolo (mAP), track_yolo (mAP), segment_yolo (mAP_50 mask branch),
+  detect_yolo (mAP), track_yolo (mAP), segment_yolo (mask_map mask branch),
   classify_yolo (accuracy), pose_yolo (mAP), obb_yolo (mAP).
 
 Summary lines use canonical metric keys from ``vision_lab.metrics.METRICS`` where
@@ -66,22 +66,23 @@ import re
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Type
+from typing import Any, cast
 
 import numpy as np
 import torch
+import trackio
 import yaml
 from datasets import Dataset, DatasetDict, load_dataset
 from huggingface_hub import login
 from transformers import HfArgumentParser, TrainingArguments
+from ultralytics.models.rtdetr.model import RTDETR
+from ultralytics.models.yolo.model import YOLO, YOLOE, YOLOWorld
+from ultralytics.utils import DEFAULT_CFG
 
-import trackio
 from train_detect import ModelArguments, detect_bbox_format_from_samples, sanitize_dataset
-from ultralytics import YOLO
-from ultralytics.cfg import DEFAULT_CFG
-from ultralytics.models.yolo.model import YOLOE, YOLOWorld
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -90,6 +91,14 @@ from vision_lab.metrics import METRICS
 
 logger = logging.getLogger(__name__)
 
+
+def _require_training_output_dir(training_args: TrainingArguments) -> Path:
+    od = training_args.output_dir
+    if od is None or not str(od).strip():
+        raise SystemExit("output_dir must be set in config for Ultralytics training/export paths.")
+    return Path(od).expanduser().resolve()
+
+
 # Keys Ultralytics documents for training; used only to warn on likely typos.
 _KNOWN_ULTRATRAIN_KEYS = frozenset(vars(DEFAULT_CFG).keys())
 
@@ -97,7 +106,7 @@ _KNOWN_ULTRATRAIN_KEYS = frozenset(vars(DEFAULT_CFG).keys())
 _RESERVED_ULTRATRAIN_KEYS = frozenset({"data", "project", "name", "exist_ok"})
 
 # Optional YAML: ultralytics_bridge (see module docstring).
-_TRAINER_REGISTRY: dict[str, Type[Any]] | None = None
+_TRAINER_REGISTRY: dict[str, type[Any]] | None = None
 
 
 def _coerce_ultralytics_bridge(raw: Any, config_path: Path) -> dict[str, Any]:
@@ -117,12 +126,12 @@ def _looks_like_yolo_nas_weights(model_path: str) -> bool:
     return "yolo_nas" in s or s.startswith("yolonas")
 
 
-def _trainer_name_registry() -> dict[str, Type[Any]]:
+def _trainer_name_registry() -> dict[str, type[Any]]:
     """Map YAML ``trainer`` string → class. Lazily populated for optional Ultralytics extras."""
     global _TRAINER_REGISTRY
     if _TRAINER_REGISTRY is not None:
         return _TRAINER_REGISTRY
-    reg: dict[str, Type[Any]] = {}
+    reg: dict[str, type[Any]] = {}
     try:
         from ultralytics.models.yolo.world.train import WorldTrainer
 
@@ -151,7 +160,7 @@ def _trainer_name_registry() -> dict[str, Type[Any]]:
     return reg
 
 
-def _resolve_trainer_class(name: str) -> Type[Any]:
+def _resolve_trainer_class(name: str) -> type[Any]:
     reg = _trainer_name_registry()
     key = str(name).strip()
     if key in reg:
@@ -185,8 +194,6 @@ def load_ultralytics_model(model_path: str, ledger_task: str, bridge: dict[str, 
     if mc in ("yolo_world", "yoloworld", "world"):
         return YOLOWorld(model_path)
     if mc in ("rtdetr", "rt-detr", "rt_detr"):
-        from ultralytics import RTDETR
-
         return RTDETR(model_path)
     raise SystemExit(
         f"ultralytics_bridge.model_class must be one of auto, yolo, yoloe, yolo_world, rtdetr; got {raw_mc!r}"
@@ -211,7 +218,7 @@ def _maybe_sync_open_vocab_class_names(model: Any, ordered_names: list[str], bri
             logger.warning("YOLOE set_classes skipped: %s", exc)
 
 
-def _resolve_trainer_for_yoloe(ledger_task: str, mode: str) -> Type[Any] | None:
+def _resolve_trainer_for_yoloe(ledger_task: str, mode: str) -> type[Any] | None:
     """Pick default YOLOE trainer when ``yoloe_training`` is full vs linear_probe (Ultralytics PE trainers)."""
     mode = (mode or "auto").strip().lower()
     if mode == "auto":
@@ -236,9 +243,9 @@ def _pick_trainer_class(
     model: Any,
     ledger_task: str,
     bridge: dict[str, Any],
-    explicit_trainer: Type[Any] | None,
+    explicit_trainer: type[Any] | None,
     bridge_trainer_name: str | None,
-) -> Type[Any] | None:
+) -> type[Any] | None:
     if explicit_trainer is not None:
         return explicit_trainer
     if bridge_trainer_name:
@@ -274,11 +281,11 @@ def build_ultralytics_train_kwargs(
     data_args: YoloDataArguments,
     ultralytics_train: dict[str, Any],
     bridge: dict[str, Any],
-) -> tuple[dict[str, Any], Type[Any] | None]:
+) -> tuple[dict[str, Any], type[Any] | None]:
     """Build kwargs for ``model.train()``; returns ``(train_kwargs, explicit_trainer_class)``."""
     merged: dict[str, Any] = dict(ultralytics_train)
     trainer_spec = merged.pop("trainer", None)
-    explicit_trainer: Type[Any] | None = None
+    explicit_trainer: type[Any] | None = None
     if isinstance(trainer_spec, str) and trainer_spec.strip():
         explicit_trainer = _resolve_trainer_class(trainer_spec.strip())
     elif inspect.isclass(trainer_spec):
@@ -331,23 +338,23 @@ LEDGER_TASKS = frozenset(
 @dataclass
 class YoloDataArguments:
     dataset_name: str = field(default="cppe-5", metadata={"help": "HF Hub dataset name."})
-    dataset_config_name: Optional[str] = field(default=None, metadata={"help": "Dataset config name."})
-    train_val_split: Optional[float] = field(
+    dataset_config_name: str | None = field(default=None, metadata={"help": "Dataset config name."})
+    train_val_split: float | None = field(
         default=0.15,
         metadata={"help": "Holdout fraction from train when no validation split exists."},
     )
     image_square_size: int = field(default=640, metadata={"help": "YOLO imgsz."})
-    max_train_samples: Optional[int] = field(default=None, metadata={"help": "Cap training samples."})
-    max_eval_samples: Optional[int] = field(default=None, metadata={"help": "Cap validation samples."})
+    max_train_samples: int | None = field(default=None, metadata={"help": "Cap training samples."})
+    max_eval_samples: int | None = field(default=None, metadata={"help": "Cap validation samples."})
     label_column: str = field(
         default="label",
         metadata={"help": "Classification label column (classify_yolo)."},
     )
-    mask_column: Optional[str] = field(
+    mask_column: str | None = field(
         default=None,
         metadata={"help": "Semantic mask column for segment_yolo (auto if unset)."},
     )
-    objects_category_field: Optional[str] = field(
+    objects_category_field: str | None = field(
         default=None,
         metadata={
             "help": (
@@ -452,14 +459,13 @@ def read_segment_metrics(run_dir: Path) -> dict[str, float]:
     """Mask-branch detection metrics from Ultralytics (honest mAP names; not IoU)."""
     csv_path = run_dir / "results.csv"
     if not csv_path.exists():
-        return {"mAP": 0.0, "mAP_50": 0.0}
+        return {"mask_map": 0.0}
     rows = list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
     if not rows:
-        return {"mAP": 0.0, "mAP_50": 0.0}
+        return {"mask_map": 0.0}
     last = rows[-1]
     map50_m = pick_csv_metric(last, ("metrics/mAP50(M)",))
-    map5095_m = pick_csv_metric(last, ("metrics/mAP50-95(M)",))
-    return {"mAP": map5095_m, "mAP_50": map50_m}
+    return {"mask_map": map50_m}
 
 
 def _assert_pose_keypoints(dataset: Any, ledger_task: str) -> None:
@@ -500,7 +506,7 @@ def emit_summary(
 _OBJECTS_CATEGORY_KEYS = ("category", "label", "categories")
 
 
-def _objects_category_source_key(sample_objects: dict[str, Any], explicit: Optional[str]) -> str:
+def _objects_category_source_key(sample_objects: dict[str, Any], explicit: str | None) -> str:
     """Resolve which objects sub-field holds class labels (aligned with prepare.py detection inspection)."""
     raw = str(explicit).strip() if explicit is not None else ""
     raw_lower = raw.lower()
@@ -524,7 +530,7 @@ def _objects_category_source_key(sample_objects: dict[str, Any], explicit: Optio
     )
 
 
-def _category_classlabel_names_from_features(ds_train: Dataset) -> Optional[list[str]]:
+def _category_classlabel_names_from_features(ds_train: Dataset) -> list[str] | None:
     """Read ClassLabel.names from objects.{category|label|categories} if present."""
     try:
         objects_feat = ds_train.features["objects"]
@@ -546,7 +552,7 @@ def _category_classlabel_names_from_features(ds_train: Dataset) -> Optional[list
     return None
 
 
-def ensure_objects_have_category_column(dataset: DatasetDict, explicit_field: Optional[str]) -> None:
+def ensure_objects_have_category_column(dataset: DatasetDict, explicit_field: str | None) -> None:
     """Copy ``label`` / ``categories`` into ``category`` when the canonical key is absent."""
     sample_o = dataset["train"][0]["objects"]
     if not isinstance(sample_o, dict):
@@ -575,7 +581,8 @@ def discover_categories_and_remap(dataset: DatasetDict) -> dict[int, str]:
     if categories is None:
         logger.info("Category feature is not ClassLabel — scanning dataset...")
         unique_cats: set[Any] = set()
-        for example in dataset["train"]:
+        for raw_example in dataset["train"]:
+            example = cast(dict[str, Any], raw_example)
             cats = example["objects"]["category"]
             if isinstance(cats, list):
                 unique_cats.update(cats)
@@ -819,7 +826,7 @@ def collect_mask_label_values(ds: Dataset, mask_col: str, max_samples: int = 256
     return out if out else [1]
 
 
-def resolve_mask_column(ds: Dataset, explicit: Optional[str]) -> str:
+def resolve_mask_column(ds: Dataset, explicit: str | None) -> str:
     if explicit and explicit in ds.column_names:
         return explicit
     for c in ("label", "annotation", "mask", "segmentation_mask", "segmentation"):
@@ -860,7 +867,8 @@ def prepare_classify_dataset(
             dataset[k] = dataset[k].map(_pass)
     else:
         labels_set: set[Any] = set()
-        for ex in dataset["train"]:
+        for raw_ex in dataset["train"]:
+            ex = cast(dict[str, Any], raw_ex)
             labels_set.add(ex[label_col])
         sorted_labels = sorted(labels_set, key=lambda x: str(x))
         id2label = {i: str(sorted_labels[i]) for i in range(len(sorted_labels))}
@@ -946,12 +954,12 @@ def train_loop(
     start_time: float,
     ultralytics_train: dict[str, Any],
     bridge: dict[str, Any],
-    ordered_class_names: Optional[list[str]] = None,
+    ordered_class_names: list[str] | None = None,
 ) -> None:
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
-    out_root = Path(training_args.output_dir).resolve()
+    out_root = _require_training_output_dir(training_args)
     train_kwargs, explicit_trainer = build_ultralytics_train_kwargs(
         data_yaml=data_yaml,
         out_root=out_root,
@@ -1007,7 +1015,8 @@ def run_detect_family(
 ) -> None:
     dataset, id2label = prepare_detection_like_dataset(model_args, data_args, training_args)
     _assert_pose_keypoints(dataset, ledger_task)
-    yolo_root = Path(training_args.output_dir) / "yolo_dataset"
+    base_out = _require_training_output_dir(training_args)
+    yolo_root = base_out / "yolo_dataset"
     if yolo_root.exists():
         shutil.rmtree(yolo_root)
     train_img = yolo_root / "images" / "train"
@@ -1076,7 +1085,8 @@ def run_segment_yolo(
         classes = [1]
     id2label = {i: f"class_{c}" for i, c in enumerate(classes)}
 
-    yolo_root = Path(training_args.output_dir) / "yolo_dataset"
+    base_out = _require_training_output_dir(training_args)
+    yolo_root = base_out / "yolo_dataset"
     if yolo_root.exists():
         shutil.rmtree(yolo_root)
 
@@ -1130,7 +1140,8 @@ def run_classify_yolo(
 ) -> None:
     dataset, id2label, cls_key = prepare_classify_dataset(model_args, data_args, training_args)
     val_key = "validation" if "validation" in dataset else "test"
-    yolo_root = Path(training_args.output_dir) / "yolo_cls_dataset"
+    base_out = _require_training_output_dir(training_args)
+    yolo_root = base_out / "yolo_cls_dataset"
     if yolo_root.exists():
         shutil.rmtree(yolo_root)
     export_classify_split(dataset["train"], yolo_root / "train", cls_key)
@@ -1170,7 +1181,7 @@ def main() -> None:
     ultralytics_train = _coerce_ultralytics_train_block(raw_cfg.get("ultralytics_train"), cfg_path)
     bridge = _coerce_ultralytics_bridge(raw_cfg.get("ultralytics_bridge"), cfg_path)
 
-    parser = HfArgumentParser((ModelArguments, YoloDataArguments, TrainingArguments))
+    parser = HfArgumentParser(cast(Any, (ModelArguments, YoloDataArguments, TrainingArguments)))
     if cfg_path.suffix.lower() in {".yaml", ".yml"}:
         model_args, data_args, training_args = parser.parse_yaml_file(
             yaml_file=str(cfg_path), allow_extra_keys=True
@@ -1191,8 +1202,9 @@ def main() -> None:
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-    Path(training_args.output_dir).mkdir(parents=True, exist_ok=True)
-    trackio.init(project=training_args.output_dir, name=training_args.run_name)
+    out_base = _require_training_output_dir(training_args)
+    out_base.mkdir(parents=True, exist_ok=True)
+    trackio.init(project=str(out_base), name=training_args.run_name)
 
     if ledger_task in ("detect_yolo", "track_yolo"):
         run_detect_family(

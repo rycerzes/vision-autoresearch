@@ -214,7 +214,7 @@ def build_worker_contract(state: dict) -> str:
         "- run `uv run scripts/refresh_master.py` before editing unless the parent confirms the worktree is already refreshed",
         f"- run `uv run scripts/hf_job.py preflight --task {task}`",
         f"- run `uv run scripts/hf_job.py launch --task {task} --config {config}`",
-        f"- stream logs with `uv run scripts/hf_job.py logs <JOB_ID> --follow --output $VISION_LOG_PATH`",
+        "- stream logs with `uv run scripts/hf_job.py logs <JOB_ID> --follow --output $VISION_LOG_PATH`",
         "- parse the final metric with `uv run scripts/parse_metric.py <log-path>`",
         '- record the run with `uv run scripts/submit_patch.py --comment "..."`',
         "- promotion only happens when the configured promotion policy beats current master (higher- or lower-is-better)",

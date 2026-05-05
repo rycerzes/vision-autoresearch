@@ -19,8 +19,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import urllib.request
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections import Counter
 from typing import Any
 
@@ -56,7 +57,7 @@ def api_request(url: str) -> dict | None:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        raise RuntimeError(f"API request failed: {e.code} {e.reason}")
+        raise RuntimeError(f"API request failed: {e.code} {e.reason}") from e
 
 
 def get_splits(dataset: str) -> dict | None:

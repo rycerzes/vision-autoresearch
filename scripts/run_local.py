@@ -15,13 +15,12 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from vision_lab.task_registry import all_task_ids, task_script_map
-
 from vision_lab.preflight_report import (
     build_preflight_report,
     print_preflight_report,
     resolve_task_from_config,
 )
+from vision_lab.task_registry import all_task_ids, task_script_map
 
 TASK_SCRIPTS = task_script_map()
 _CLI_TASKS = list(all_task_ids())

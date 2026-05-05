@@ -6,9 +6,9 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from vision_lab.alignment_checks import collect_alignment_issues
 from vision_lab.dataset_contracts import preflight_adapter_matches_task
 from vision_lab.dataset_validation import validate_dataset
-from vision_lab.alignment_checks import collect_alignment_issues
 from vision_lab.task_registry import task_script_map
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

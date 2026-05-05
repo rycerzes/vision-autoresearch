@@ -9,6 +9,13 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+import yaml
+
+from vision_lab.promotion import assert_summary_eligible_for_recording, load_promotion_policy
 from vision_lab.summary_schema import (
     NUMERIC_SUMMARY_KEYS,
     STRING_SUMMARY_KEYS,
@@ -62,6 +69,18 @@ def main() -> int:
     )
     parser.add_argument("log_path", help="Path to the training log file")
     parser.add_argument("--key", help="Print only this metric value (no JSON wrapper)")
+    parser.add_argument(
+        "--task",
+        help=(
+            "If set with optional --config, validate summary metrics against the task promotion "
+            "contract before printing."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="YAML config used to resolve promotion block when validating with --task",
+    )
     args = parser.parse_args()
 
     text = Path(args.log_path).read_text(encoding="utf-8")
@@ -73,6 +92,22 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.task:
+        cfg: dict = {}
+        if args.config:
+            loaded = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+            cfg = loaded if isinstance(loaded, dict) else {}
+        try:
+            policy = load_promotion_policy(cfg, task_id=args.task)
+            assert_summary_eligible_for_recording(
+                task_id=args.task,
+                policy=policy,
+                summary_metrics=metrics,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     if args.key:
         value = metrics.get(args.key)

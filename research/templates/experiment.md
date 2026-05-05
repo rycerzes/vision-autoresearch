@@ -3,7 +3,7 @@
 ## Campaign
 
 - Campaign: `<theme>`
-- Task type: `detect|classify|segment`
+- Task type: `detect|classify|segment|detect_yolo|track_yolo|segment_yolo|classify_yolo|pose_yolo|obb_yolo`
 - Backend: `transformers|ultralytics`
 - Model: `<model_name>`
 - Dataset: `<dataset_name>`
@@ -48,7 +48,7 @@
 - Run `uv run scripts/hf_job.py preflight --task <task>`
 - Run `uv run scripts/hf_job.py launch --task <task> --config <path>`
 - Stream logs
-- Parse `uv run scripts/parse_metric.py <log-path>`
+- Parse `uv run scripts/parse_metric.py <log-path>` (optional: `--task` / `--config` for contract validation)
 - Record with `uv run scripts/submit_patch.py --comment "..."`
 
 ## Result

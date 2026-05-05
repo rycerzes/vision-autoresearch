@@ -7,8 +7,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from vision_lab.task_registry import promotion_metric_for_task
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,8 +51,9 @@ RESULTS_COLUMNS = [
     "promotion_rerun_recommended",
     "mAP",
     "mAP_50",
+    "mask_map",
     "accuracy",
-    "iou",
+    "mIoU",
     "dice",
     "training_seconds",
     "total_seconds",
@@ -132,7 +134,7 @@ def load_results_rows() -> list[dict[str, str]]:
         reader = csv.DictReader(handle, delimiter="\t")
         fieldnames = tuple(reader.fieldnames or ())
         if fieldnames == tuple(RESULTS_COLUMNS):
-            return [normalize_row(row) for row in reader]
+            return [normalize_row(cast(dict[str, object], row)) for row in reader]
         raise RuntimeError(
             f"{RESULTS_PATH.relative_to(ROOT)} has unexpected columns; "
             f"expected {RESULTS_COLUMNS}, got {reader.fieldnames}"
@@ -214,6 +216,13 @@ def seed_row(task_type: str = "detect") -> dict[str, object]:
     seed_task = metadata.get("task_type") or task_type
     content = seed_config_content(seed_task)
     c_hash = config_hash_from_text(content)
+    promo_raw = metadata.get("promotion_metric", "")
+    promo = promo_raw.strip() if isinstance(promo_raw, str) else ""
+    if not promo:
+        try:
+            promo = promotion_metric_for_task(str(seed_task))
+        except KeyError:
+            promo = ""
     return {
         "run_id": "seed",
         "created_at": metadata.get("created_at") or now_utc_iso(),
@@ -230,12 +239,13 @@ def seed_row(task_type: str = "detect") -> dict[str, object]:
         "config_hash": c_hash,
         "parent_hash": metadata.get("parent_hash", ""),
         "candidate_hash": c_hash,
-        "promotion_metric": metadata.get("promotion_metric", ""),
+        "promotion_metric": promo,
         "promotion_metric_value": metadata.get("promotion_metric_value", ""),
         "mAP": metadata.get("mAP", ""),
         "mAP_50": metadata.get("mAP_50", ""),
+        "mask_map": metadata.get("mask_map", ""),
         "accuracy": metadata.get("accuracy", ""),
-        "iou": metadata.get("iou", ""),
+        "mIoU": metadata.get("mIoU", ""),
         "dice": metadata.get("dice", ""),
         "training_seconds": "",
         "total_seconds": "",
@@ -273,6 +283,7 @@ def current_master_hash(rows: list[dict[str, str]] | None = None) -> str | None:
 
 
 def build_master_snapshot(row: dict[str, str]) -> dict[str, Any]:
+    """Snapshot keys align with ``RESULTS_COLUMNS`` headline metrics + promotion fields."""
     return {
         "task_type": row.get("task_type", ""),
         "hash": row.get("candidate_hash", ""),
@@ -281,11 +292,27 @@ def build_master_snapshot(row: dict[str, str]) -> dict[str, Any]:
         "dataset_name": row.get("dataset_name", ""),
         "promotion_metric": row.get("promotion_metric", ""),
         "promotion_metric_value": parse_float(row.get("promotion_metric_value")),
+        "promotion_baseline_value": parse_float(row.get("promotion_baseline_value")),
+        "promotion_delta": parse_float(row.get("promotion_delta")),
+        "promotion_relative_delta": parse_float(row.get("promotion_relative_delta")),
+        "promotion_min_delta_met": truthy(row.get("promotion_min_delta_met"))
+        if row.get("promotion_min_delta_met") not in (None, "")
+        else None,
+        "promotion_gates_met": truthy(row.get("promotion_gates_met"))
+        if row.get("promotion_gates_met") not in (None, "")
+        else None,
+        "promotion_rerun_recommended": truthy(row.get("promotion_rerun_recommended"))
+        if row.get("promotion_rerun_recommended") not in (None, "")
+        else None,
         "mAP": parse_float(row.get("mAP")),
         "mAP_50": parse_float(row.get("mAP_50")),
+        "mask_map": parse_float(row.get("mask_map")),
         "accuracy": parse_float(row.get("accuracy")),
-        "iou": parse_float(row.get("iou")),
+        "mIoU": parse_float(row.get("mIoU")),
         "dice": parse_float(row.get("dice")),
+        "training_seconds": parse_float(row.get("training_seconds")),
+        "total_seconds": parse_float(row.get("total_seconds")),
+        "peak_vram_mb": parse_float(row.get("peak_vram_mb")),
         "created_at": row.get("created_at", ""),
         "job_id": row.get("job_id", ""),
         "campaign": row.get("campaign", ""),

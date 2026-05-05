@@ -1,21 +1,6 @@
 {
   "task_type": "detect",
-  "hash": "",
-  "parent_hash": "",
-  "model_name": "ustc-community/dfine-small-coco",
-  "dataset_name": "cppe-5",
-  "promotion_metric": "mAP",
-  "promotion_metric_value": null,
-  "mAP": null,
-  "mAP_50": null,
-  "created_at": "",
-  "job_id": "",
-  "campaign": "",
-  "experiment_id": "",
-  "worker_id": "",
-  "hypothesis": "",
-  "status": "",
-  "comment": "",
-  "promoted": false,
-  "config": {}
+  "config_path": "configs/base_detect.yaml",
+  "config_content": "# Base config for object detection (Transformers backend)\n# Experiments modify this file; training scripts are stable infrastructure.\n\ntask_type: detect\nbackend: transformers\n\n# Model\nmodel_name_or_path: ustc-community/dfine-small-coco\n\n# Dataset (must be on HF Hub)\ndataset_name: cppe-5\ntrain_split: train\neval_split: test\n\n# Training\nnum_train_epochs: 20\nper_device_train_batch_size: 8\nper_device_eval_batch_size: 8\nlearning_rate: 5.0e-5\nweight_decay: 0.01\nwarmup_steps: 0.1\nlr_scheduler_type: cosine\ngradient_accumulation_steps: 1\nfp16: true\ndataloader_num_workers: 4\ndo_train: true\ndo_eval: true\n\n# Augmentation\nimage_square_size: 640\nuse_albumentations: true\n\n# Backbone\nfreeze_backbone: false\n\n# Evaluation\neval_strategy: epoch\nsave_strategy: epoch\nload_best_model_at_end: true\nmetric_for_best_model: eval_mAP\ngreater_is_better: true\n\n# Promotion (submit_patch ledger / local master)\npromotion:\n  primary: mAP\n  direction: higher\n  min_delta: 0.0\n\n# Hub\npush_to_hub: false\n",
+  "config_hash": "5776ca0426253aa207b7d9bb745a1490dc265f11"
 }

@@ -24,7 +24,7 @@ Primary workflow:
 5. `uv run scripts/hf_job.py preflight --task <task>` (checks task ↔ `task_type`, promotion block, model backend, optional `dataset_adapter` / local `dataset_root`)
 6. `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 7. `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
-8. `uv run scripts/parse_metric.py /tmp/vision-run.log`
+8. `uv run scripts/parse_metric.py /tmp/vision-run.log` (optional: `--task <task> [--config <yaml>]` to validate the summary against the task promotion contract)
 9. `uv run scripts/submit_patch.py --comment "..."`
 
 Supported tasks:

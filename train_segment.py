@@ -6,23 +6,25 @@ Experiments modify config YAMLs only.
 Adapted from huggingface/skills huggingface-vision-trainer.
 """
 
+# pyright: reportPrivateImportUsage=false
+# PyTorch typings mark many public APIs as private re-exports.
+
 import json
 import logging
 import os
 import sys
 import time
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
-from torch.utils.data import Dataset
-
-import monai
 import trackio
-
 import transformers
+from datasets import load_dataset
+from monai.losses.dice import DiceCELoss
+from torch.utils.data import Dataset
 from transformers import (
     HfArgumentParser,
     Trainer,
@@ -129,7 +131,7 @@ def collate_fn(batch):
 
 # Loss (SAM/SAM2 don't compute loss in forward())
 
-seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction="mean")
+seg_loss = DiceCELoss(sigmoid=True, squared_pred=True, reduction="mean")
 
 
 def compute_loss(outputs, labels, num_items_in_batch=None):
@@ -164,7 +166,7 @@ def compute_iou_metrics(eval_pred):
     dice_den = preds.sum(dim=(-2, -1)) + labels.sum(dim=(-2, -1))
     dice = (dice_num / (dice_den + 1e-8)).mean().item()
 
-    return {"iou": round(iou, 4), "dice": round(dice, 4)}
+    return {"mIoU": round(iou, 4), "dice": round(dice, 4)}
 
 
 # CLI dataclasses
@@ -242,7 +244,7 @@ class ModelArguments:
 def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, peak_vram_mb: float):
     print("\n--- VISION AUTORESEARCH SUMMARY ---")
     print("task_type: segment")
-    print(f"iou: {metrics.get('eval_iou', metrics.get('iou', 0.0))}")
+    print(f"mIoU: {metrics.get('eval_mIoU', metrics.get('mIoU', 0.0))}")
     print(f"dice: {metrics.get('eval_dice', metrics.get('dice', 0.0))}")
     print(f"training_seconds: {training_seconds:.1f}")
     print(f"peak_vram_mb: {peak_vram_mb:.0f}")
@@ -256,7 +258,7 @@ def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, pe
 def main():
     start_time = time.time()
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
         model_args, data_args, training_args = parser.parse_yaml_file(
@@ -338,11 +340,11 @@ def main():
     is_sam2 = "sam2" in model_id
 
     if is_sam2:
-        from transformers import Sam2Processor, Sam2Model
+        from transformers import Sam2Model, Sam2Processor
         processor = Sam2Processor.from_pretrained(model_args.model_name_or_path)
         model = Sam2Model.from_pretrained(model_args.model_name_or_path)
     else:
-        from transformers import SamProcessor, SamModel
+        from transformers import SamModel, SamProcessor
         processor = SamProcessor.from_pretrained(model_args.model_name_or_path)
         model = SamModel.from_pretrained(model_args.model_name_or_path)
 
@@ -362,20 +364,29 @@ def main():
 
     # Build datasets
     prompt_col = data_args.prompt_column_name if data_args.prompt_column_name else None
-    ds_kwargs = dict(
+
+    train_dataset = SAMSegmentationDataset(
+        dataset=dataset["train"],
         processor=processor,
-        prompt_type=data_args.prompt_type,
-        image_col=data_args.image_column_name,
-        mask_col=data_args.mask_column_name,
+        prompt_type=str(data_args.prompt_type),
+        image_col=str(data_args.image_column_name),
+        mask_col=str(data_args.mask_column_name),
         prompt_col=prompt_col,
         bbox_col=data_args.bbox_column_name,
         point_col=data_args.point_column_name,
     )
-
-    train_dataset = SAMSegmentationDataset(dataset=dataset["train"], **ds_kwargs)
     eval_dataset = None
     if eval_key in dataset:
-        eval_dataset = SAMSegmentationDataset(dataset=dataset[eval_key], **ds_kwargs)
+        eval_dataset = SAMSegmentationDataset(
+            dataset=dataset[eval_key],
+            processor=processor,
+            prompt_type=str(data_args.prompt_type),
+            image_col=str(data_args.image_column_name),
+            mask_col=str(data_args.mask_column_name),
+            prompt_col=prompt_col,
+            bbox_col=data_args.bbox_column_name,
+            point_col=data_args.point_column_name,
+        )
 
     # Trainer
     trainer = Trainer(

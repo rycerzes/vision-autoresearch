@@ -43,7 +43,7 @@ metric_for_best_model: map50
 greater_is_better: true
 
 promotion:
-  primary: mAP_50
+  primary: mask_map
   direction: higher
   min_delta: 0.0
 

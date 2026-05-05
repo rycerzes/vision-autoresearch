@@ -6,15 +6,21 @@ Experiments modify config YAMLs only.
 Adapted from huggingface/skills huggingface-vision-trainer.
 """
 
+# pyright: reportPrivateImportUsage=false
+# PyTorch typings mark many public APIs as private re-exports.
+
 import logging
 import os
 import sys
 import time
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 import evaluate
 import numpy as np
 import torch
+import trackio
+import transformers
 from datasets import load_dataset
 from torchvision.transforms import (
     CenterCrop,
@@ -25,10 +31,6 @@ from torchvision.transforms import (
     Resize,
     ToTensor,
 )
-
-import trackio
-
-import transformers
 from transformers import (
     AutoConfig,
     AutoImageProcessor,
@@ -38,7 +40,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-from transformers.trainer import EvalPrediction
+from transformers.trainer_utils import EvalPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +176,7 @@ def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, pe
 def main():
     start_time = time.time()
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
         model_args, data_args, training_args = parser.parse_yaml_file(
@@ -347,9 +349,13 @@ def main():
     # Metrics
     accuracy_metric = evaluate.load("accuracy")
 
-    def compute_metrics(eval_pred: EvalPrediction):
+    def compute_metrics(eval_pred: EvalPrediction) -> dict[str, Any]:
         predictions = np.argmax(eval_pred.predictions, axis=1)
-        return accuracy_metric.compute(predictions=predictions, references=eval_pred.label_ids)
+        computed = accuracy_metric.compute(
+            predictions=predictions,
+            references=eval_pred.label_ids,
+        )
+        return cast(dict[str, Any], computed)
 
     # Trainer
     eval_dataset = None
@@ -385,7 +391,10 @@ def main():
         test_dataset = dataset.get("test", dataset.get("validation"))
         test_prefix = "test" if "test" in dataset else "eval"
         if test_dataset is not None:
-            eval_metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix=test_prefix)
+            eval_metrics = trainer.evaluate(
+                eval_dataset=cast(Any, test_dataset),
+                metric_key_prefix=test_prefix,
+            )
             trainer.log_metrics(test_prefix, eval_metrics)
             trainer.save_metrics(test_prefix, eval_metrics)
 

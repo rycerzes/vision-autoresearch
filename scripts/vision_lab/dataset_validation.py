@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from vision_lab.dataset_adapters.coco_json import find_coco_json, validate_coco_json
 from vision_lab.dataset_adapters.depth_pairs import validate_depth_pairs

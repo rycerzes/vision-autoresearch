@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _m(*names: str) -> frozenset[str]:
+    return frozenset(names)
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     """One benchmark task the lab can run or validate (CLI / jobs / submit)."""
@@ -14,10 +18,14 @@ class TaskSpec:
     """High-level trainer family: ``transformers`` or ``ultralytics``."""
     train_script: str
     """Python entry script filename at repo root (e.g. ``train_detect.py``)."""
-    default_promotion_metric: str
-    """Metric name as emitted in ``VISION AUTORESEARCH SUMMARY`` / submit row."""
     dataset_schema_kind: str
-    """Which HF dataset column contract applies: detection, segmentation, or classification (see ``vision_lab.dataset_validation``)."""
+    """HF dataset column contract (see ``vision_lab.dataset_validation``)."""
+    primary_metric: str
+    """Standard summary key used as default promotion primary."""
+    allowed_promotion_metrics: frozenset[str]
+    """Metrics allowed in ``promotion`` (primary, secondary, gates, tie_breakers)."""
+    trainable: bool = True
+    evaluable: bool = True
 
 
 _TASKS: tuple[TaskSpec, ...] = (
@@ -25,64 +33,73 @@ _TASKS: tuple[TaskSpec, ...] = (
         id="detect",
         backend="transformers",
         train_script="train_detect.py",
-        default_promotion_metric="mAP",
         dataset_schema_kind="detection",
+        primary_metric="mAP",
+        allowed_promotion_metrics=_m("mAP", "mAP_50"),
     ),
     TaskSpec(
         id="classify",
         backend="transformers",
         train_script="train_classify.py",
-        default_promotion_metric="accuracy",
         dataset_schema_kind="classification",
+        primary_metric="accuracy",
+        allowed_promotion_metrics=_m("accuracy"),
     ),
     TaskSpec(
         id="segment",
         backend="transformers",
         train_script="train_segment.py",
-        default_promotion_metric="iou",
         dataset_schema_kind="segmentation",
+        primary_metric="mIoU",
+        allowed_promotion_metrics=_m("mIoU"),
     ),
     TaskSpec(
         id="detect_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="mAP",
         dataset_schema_kind="detection",
+        primary_metric="mAP",
+        allowed_promotion_metrics=_m("mAP", "mAP_50"),
     ),
     TaskSpec(
         id="track_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="mAP",
         dataset_schema_kind="detection",
+        primary_metric="mAP",
+        allowed_promotion_metrics=_m("mAP", "mAP_50"),
     ),
     TaskSpec(
         id="segment_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="mAP_50",
         dataset_schema_kind="segmentation",
+        primary_metric="mask_map",
+        allowed_promotion_metrics=_m("mask_map"),
     ),
     TaskSpec(
         id="classify_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="accuracy",
         dataset_schema_kind="classification",
+        primary_metric="accuracy",
+        allowed_promotion_metrics=_m("accuracy"),
     ),
     TaskSpec(
         id="pose_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="mAP",
         dataset_schema_kind="detection",
+        primary_metric="mAP",
+        allowed_promotion_metrics=_m("mAP", "mAP_50"),
     ),
     TaskSpec(
         id="obb_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
-        default_promotion_metric="mAP",
         dataset_schema_kind="detection",
+        primary_metric="mAP",
+        allowed_promotion_metrics=_m("mAP", "mAP_50"),
     ),
 )
 
@@ -112,9 +129,10 @@ def task_script_map() -> dict[str, str]:
 
 
 def promotion_metric_for_task(task_id: str) -> str:
+    """Default promotion primary metric name for ``task_id`` (standard key)."""
     if task_id not in TASK_BY_ID:
         raise KeyError(f"Unknown task: {task_id!r}")
-    return TASK_BY_ID[task_id].default_promotion_metric
+    return TASK_BY_ID[task_id].primary_metric
 
 
 def get_task(task_id: str) -> TaskSpec:

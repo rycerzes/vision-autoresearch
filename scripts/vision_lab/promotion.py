@@ -7,11 +7,12 @@ lower-is-better).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
-from vision_lab.metrics import METRICS, MetricDirection
-from vision_lab.task_registry import TASK_BY_ID, promotion_metric_for_task
+from vision_lab.metrics import STANDARD_METRICS, MetricDirection, direction_for_standard_metric
+from vision_lab.task_registry import TASK_BY_ID, get_task, promotion_metric_for_task
 
 
 @dataclass(frozen=True)
@@ -66,18 +67,70 @@ def _parse_float(val: Any) -> float | None:
 
 
 def _default_direction_for_metric(metric: str) -> MetricDirection:
-    spec = METRICS.get(metric)
-    if spec is None:
+    return direction_for_standard_metric(metric)
+
+
+def _assert_metric_allowed_for_task(task_id: str, metric: str, role: str) -> None:
+    spec = get_task(task_id)
+    if metric not in STANDARD_METRICS:
         raise ValueError(
-            f"Metric {metric!r} has no direction in vision_lab.metrics.METRICS; "
-            "set promotion.direction in the config."
+            f"promotion {role} metric {metric!r} is not a standard metric name "
+            f"(allowed keys: {', '.join(sorted(STANDARD_METRICS))})."
         )
-    return spec.direction
+    if metric not in spec.allowed_promotion_metrics:
+        raise ValueError(
+            f"promotion {role} metric {metric!r} is not allowed for task {task_id!r} "
+            f"(allowed: {', '.join(sorted(spec.allowed_promotion_metrics))})."
+        )
+
+
+def validate_promotion_policy_for_task(task_id: str, policy: PromotionPolicy) -> None:
+    """Ensure every promotion field references only task-permitted standard metrics."""
+    _assert_metric_allowed_for_task(task_id, policy.primary, "primary")
+    if policy.secondary:
+        _assert_metric_allowed_for_task(task_id, policy.secondary, "secondary")
+    for g in policy.gates:
+        _assert_metric_allowed_for_task(task_id, g.metric, "gates")
+    for tb in policy.tie_breakers:
+        _assert_metric_allowed_for_task(task_id, tb, "tie_breakers")
+
+
+def assert_summary_eligible_for_recording(
+    *,
+    task_id: str,
+    policy: PromotionPolicy,
+    summary_metrics: Mapping[str, Any],
+) -> None:
+    """Require the resolved primary metric to be present and numeric (strict recording gate)."""
+    validate_promotion_policy_for_task(task_id, policy)
+    raw = summary_metrics.get(policy.primary)
+    if raw is None:
+        raise ValueError(
+            f"Summary is missing required primary metric {policy.primary!r} for task {task_id!r}; "
+            "runs without the task headline metric are not recorded."
+        )
+    if isinstance(raw, bool):
+        raise ValueError(
+            f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+        )
+    if isinstance(raw, (int, float)):
+        return
+    if isinstance(raw, str):
+        try:
+            float(raw)
+        except ValueError:
+            raise ValueError(
+                f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+            ) from None
+        return
+    raise ValueError(
+        f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+    )
 
 
 def _task_default_policy(task_id: str) -> PromotionPolicy:
     primary = promotion_metric_for_task(task_id)
-    return PromotionPolicy(
+    policy = PromotionPolicy(
         primary=primary,
         direction=_default_direction_for_metric(primary),
         min_delta=0.0,
@@ -85,6 +138,8 @@ def _task_default_policy(task_id: str) -> PromotionPolicy:
         gates=(),
         tie_breakers=(),
     )
+    validate_promotion_policy_for_task(task_id, policy)
+    return policy
 
 
 def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> PromotionPolicy:
@@ -152,7 +207,7 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
         raise ValueError("promotion.tie_breakers must be a list of metric names")
     tie_breakers = tuple(str(x).strip() for x in tb_raw if str(x).strip())
 
-    return PromotionPolicy(
+    policy = PromotionPolicy(
         primary=primary,
         direction=direction,
         min_delta=min_delta,
@@ -160,6 +215,8 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
         gates=tuple(gates),
         tie_breakers=tie_breakers,
     )
+    validate_promotion_policy_for_task(task_id, policy)
+    return policy
 
 
 def _marginal_improvement(

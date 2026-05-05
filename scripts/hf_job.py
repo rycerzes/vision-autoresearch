@@ -173,7 +173,7 @@ def build_bundle_script(task: str, config_path: Path) -> str:
     try:
         import tomllib
     except ModuleNotFoundError:
-        import tomli as tomllib
+        import tomli as tomllib  # type: ignore[import-not-found]
 
     with (ROOT / "pyproject.toml").open("rb") as f:
         pyproject = tomllib.load(f)

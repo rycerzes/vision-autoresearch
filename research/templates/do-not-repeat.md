@@ -7,7 +7,7 @@ guidance.
 
 - Parent config hash: `<hash>`
 - Experiment id: `<experiment-id>`
-- Task type: `<detect|classify|segment>`
+- Task type: `<detect|classify|segment|detect_yolo|track_yolo|segment_yolo|classify_yolo|pose_yolo|obb_yolo>`
 - Model: `<model_name>`
 - Dataset: `<dataset_name>`
 - Hypothesis: `<one sentence>`

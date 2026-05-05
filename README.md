@@ -6,13 +6,15 @@ Agents propose a hypothesis, change one config knob, run a finetune, and auto-pr
 
 ## Tasks
 
-| Task | Script | Default Model | Dataset | Metric |
-|------|--------|---------------|---------|--------|
-| Classify | `train_classify.py` | `google/vit-base-patch16-224` | food101 | accuracy |
-| Detect | `train_detect.py` | `ustc-community/dfine-small-coco` | cppe-5 | mAP |
-| Segment | `train_segment.py` | `facebook/sam2.1-hiera-small` | — | IoU |
+| Task | Script | Default Model | Dataset | Headline metric |
+|------|--------|---------------|---------|-----------------|
+| Classify | `train_classify.py` | `google/vit-base-patch16-224` | food101 | `accuracy` |
+| Detect | `train_detect.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
+| Segment | `train_segment.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
 
-All metrics are higher-is-better.
+Ultralytics (`train_ultralytics.py`): `detect_yolo` / `track_yolo` / `pose_yolo` / `obb_yolo` default to `mAP` (with `mAP_50` allowed in `promotion:`); `segment_yolo` uses `mask_map`; `classify_yolo` uses `accuracy`.
+
+Promotion metrics must be **standard names** allowed for that task (`scripts/vision_lab/metrics.py`, `scripts/vision_lab/task_registry.py`). Direction is **higher** or **lower** per metric, not universally “maximize.”
 
 ## Setup
 

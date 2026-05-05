@@ -7,9 +7,8 @@ import json
 import os
 import shlex
 import subprocess
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vision_lab.task_registry import all_task_ids

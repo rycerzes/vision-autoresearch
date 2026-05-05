@@ -10,7 +10,7 @@
 - Backend: `transformers|ultralytics`
 - Model: `<model_name>`
 - Dataset: `<dataset_name>`
-- Promotion metric: `<mAP|mAP_50|accuracy|iou|dice>`
+- Promotion metric: task-specific standard name (`mAP`, `mAP_50`, `mask_map`, `accuracy`, `mIoU`, … — must appear in `promotion:` and match `scripts/vision_lab/task_registry.py` for this task)
 
 ## Parent Context
 

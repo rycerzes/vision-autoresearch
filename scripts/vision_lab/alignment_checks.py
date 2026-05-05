@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from vision_lab.metrics import METRICS
 from vision_lab.promotion import load_promotion_policy
 from vision_lab.task_registry import TASK_BY_ID
 
@@ -22,22 +21,9 @@ def verify_promotion_block(cfg: dict[str, Any], task: str) -> tuple[list[str], l
     errors: list[str] = []
     warnings: list[str] = []
     try:
-        policy = load_promotion_policy(cfg, task_id=task)
+        load_promotion_policy(cfg, task_id=task)
     except ValueError as e:
         errors.append(f"promotion config: {e}")
-        return errors, warnings
-
-    if policy.primary not in METRICS:
-        warnings.append(
-            f"promotion.primary={policy.primary!r} is not in vision_lab.metrics.METRICS "
-            "(ensure the trainer emits this key in VISION AUTORESEARCH SUMMARY)."
-        )
-    for g in policy.gates:
-        if g.metric not in METRICS:
-            warnings.append(f"promotion.gates metric={g.metric!r} not in METRICS")
-    for tb in policy.tie_breakers:
-        if tb not in METRICS:
-            warnings.append(f"promotion.tie_breakers metric={tb!r} not in METRICS")
     return errors, warnings
 
 

@@ -64,6 +64,7 @@ def parse_eval_metrics(text: str) -> list[dict[str, Any]]:
                 "eval_mAP",
                 "eval_mAP_50",
                 "eval_accuracy",
+                "eval_mIoU",
                 "eval_iou",
                 "eval_dice",
             ):
@@ -76,7 +77,7 @@ def parse_eval_metrics(text: str) -> list[dict[str, Any]]:
 
 def report_to_trackio(log_path: Path, run_name: str, project: str) -> int:
     try:
-        import trackio
+        from trackio.run import Run
     except ImportError:
         print("trackio not installed; skipping report", file=sys.stderr)
         return 1
@@ -89,7 +90,7 @@ def report_to_trackio(log_path: Path, run_name: str, project: str) -> int:
         print("No metrics found in log to report")
         return 1
 
-    run = trackio.Run(project=project, name=run_name)
+    run = Run(url=None, project=project, client=None, name=run_name)
     for i, row in enumerate(step_metrics):
         run.log(row, step=i)
     for i, row in enumerate(eval_metrics):
@@ -105,7 +106,7 @@ def report_to_trackio(log_path: Path, run_name: str, project: str) -> int:
 def summary_command(args: argparse.Namespace) -> int:
     """Print a summary of recent runs from the results ledger."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    from local_results import load_results_rows, parse_float, truthy
+    from local_results import load_results_rows, truthy
 
     rows = load_results_rows()
     if not rows:

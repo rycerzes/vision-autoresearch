@@ -1,1 +1,14 @@
-[]
+{
+  "nodes": [
+    {
+      "id": "5776ca0426253aa207b7d9bb745a1490dc265f11",
+      "run_id": "seed",
+      "task_type": "detect",
+      "promotion_metric": "mAP",
+      "promotion_metric_value": null,
+      "hypothesis": "seed local master from base_detect.yaml",
+      "created_at": "2026-05-05T16:21:15Z"
+    }
+  ],
+  "edges": []
+}

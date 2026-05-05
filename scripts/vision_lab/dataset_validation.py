@@ -22,7 +22,7 @@ from vision_lab.dataset_cache import (
     resolve_dataset_cache_parent,
     write_cache_manifest,
 )
-from vision_lab.dataset_contracts import ADAPTER_SCHEMA_KIND, EXTENDED_SCHEMA_KINDS
+from vision_lab.dataset_contracts import ADAPTER_SCHEMA_KIND
 from vision_lab.task_registry import TASK_BY_ID
 
 NUM_INSPECT_SAMPLES_DEFAULT = 5
@@ -104,24 +104,38 @@ def infer_local_adapter(source: Path) -> str | None:
 
 
 def _enforce_registered_task_schema(report: dict[str, Any], task_type: str) -> None:
-    """Ensure ``report`` layout matches ``task_type`` for registered (non-extended) schemas."""
+    """Ensure validated layout matches ``task_type`` for registered tasks."""
     if task_type not in TASK_BY_ID:
         return
-    kind = report.get("dataset_schema_kind") or ""
-    if kind in EXTENDED_SCHEMA_KINDS:
+    spec = TASK_BY_ID[task_type]
+    kind = (report.get("dataset_schema_kind") or "").strip()
+    if kind and kind != spec.dataset_schema_kind:
         report.setdefault("errors", []).append(
-            f"Dataset layout uses extended schema {kind!r} which has no matching registered "
-            "task in task_registry yet."
+            f"Task {task_type!r} expects dataset_schema_kind={spec.dataset_schema_kind!r} "
+            f"but layout resolved to {kind!r}."
         )
         report["valid"] = False
+
+    if not report.get("valid"):
         return
-    compat = report.get("compatible_tasks") or []
-    if compat and task_type not in compat:
-        report.setdefault("errors", []).append(
-            f"Task {task_type!r} does not match adapter {report.get('adapter_id')!r} layout "
-            f"(compatible tasks: {compat})."
-        )
-        report["valid"] = False
+
+    if task_type == "segment":
+        adp = report.get("adapter_id") or ""
+        if adp == "semantic_masks":
+            report.setdefault("errors", []).append(
+                "Task 'segment' (SAM/SAM2) requires bbox or point prompts; plain image+mask "
+                "folders (semantic_masks) do not carry prompts — use sam_prompt_mask layout or an "
+                "HF dataset with prompt columns."
+            )
+            report["valid"] = False
+        elif adp == "sam_prompt_mask":
+            insp = report.get("inspection") or {}
+            ps = insp.get("prompt_sources") or []
+            if not ps:
+                report.setdefault("errors", []).append(
+                    "Task 'segment' requires bbox/point prompts; none found under this dataset path."
+                )
+                report["valid"] = False
 
 
 def validate_dataset(

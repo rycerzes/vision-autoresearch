@@ -81,6 +81,8 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
 
     missing_labels = 0
     nonempty_labels = 0
+    polygon_label_lines = 0
+    bbox_label_lines = 0
     images = _collect_images(images_dir)[:max_pairs_check]
     for img in images:
         stem = img.stem
@@ -92,9 +94,24 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
                 txt = lf.read_text(encoding="utf-8").strip()
                 if txt:
                     nonempty_labels += 1
+                    for line in txt.splitlines():
+                        parts = line.strip().split()
+                        if not parts:
+                            continue
+                        if len(parts) > 5:
+                            polygon_label_lines += 1
+                        elif len(parts) >= 5:
+                            bbox_label_lines += 1
 
     if labels_dir and missing_labels == len(images) and images:
         errors.append(f"No matching label .txt files in {labels_dir} for sampled images.")
+
+    schema_kind = "instance_segmentation" if polygon_label_lines > 0 else "detection"
+    if polygon_label_lines and bbox_label_lines and polygon_label_lines < nonempty_labels:
+        warnings.append(
+            "Mixed YOLO label styles (bbox and polygon) in sample — classifying as "
+            "instance_segmentation because at least one polygon line was found."
+        )
 
     row_counts = {"train": len(_collect_images(images_dir))}
 
@@ -106,6 +123,8 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
         "sample_checked": len(images),
         "missing_labels_sample": missing_labels,
         "nonempty_labels_sample": nonempty_labels,
+        "polygon_label_lines_sample": polygon_label_lines,
+        "bbox_label_lines_sample": bbox_label_lines,
         "warnings": warnings,
     }
 
@@ -113,7 +132,7 @@ def validate_yolo_folder(root: Path, *, max_pairs_check: int = 40) -> dict[str, 
         errors=errors,
         warnings=warnings,
         adapter_id="yolo_folder",
-        dataset_schema_kind="detection",
+        dataset_schema_kind=schema_kind,
         required_fields=["images/", "labels/*.txt"],
         detected_class_names=class_names,
         label_remapping=label_remapping,

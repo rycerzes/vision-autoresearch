@@ -211,17 +211,197 @@ def inspect_classification_samples(samples: list[dict], features: dict) -> dict[
     return info
 
 
-def validate_segmentation_schema(features: dict, dataset_name: str) -> list[str]:
+def validate_semantic_segmentation_schema(features: dict, dataset_name: str) -> list[str]:
+    """Dense semantic / promptable mask column (per-pixel class or RGB mask)."""
     errors: list[str] = []
     column_names = set(features.keys())
     if "image" not in column_names:
         errors.append(f"Missing 'image' column. Found: {sorted(column_names)}")
-    mask_cols = {"mask", "label", "annotation", "segmentation_mask", "masks", "segmentation"}
+        return errors
+    mask_cols = {
+        "mask",
+        "label",
+        "annotation",
+        "segmentation_mask",
+        "masks",
+        "segmentation",
+        "semantic_mask",
+        "label_map",
+    }
     if not (column_names & mask_cols):
         errors.append(
-            f"No mask column found. Expected one of {sorted(mask_cols)}. Found: {sorted(column_names)}"
+            f"No semantic mask column found. Expected one of {sorted(mask_cols)}. "
+            f"Found: {sorted(column_names)}"
         )
     return errors
+
+
+def validate_instance_segmentation_schema(features: dict, dataset_name: str) -> list[str]:
+    """Per-instance masks (polygons, RLE, or stacked instance masks) plus categories."""
+    errors: list[str] = []
+    column_names = set(features.keys())
+    if "image" not in column_names:
+        errors.append(f"Missing 'image' column. Found: {sorted(column_names)}")
+        return errors
+
+    if "objects" in column_names:
+        inner_keys = _get_nested_keys(features["objects"])
+        has_bbox = "bbox" in inner_keys or "bboxes" in inner_keys
+        has_cat = bool(inner_keys & {"category", "label", "categories"})
+        has_seg = bool(inner_keys & {"segmentation", "mask", "masks"})
+        if has_seg and has_cat:
+            return []
+        if not has_seg:
+            errors.append(
+                f"Instance segmentation requires per-instance mask data under 'objects' "
+                f"(e.g. 'segmentation' / 'mask'). Found sub-fields: {sorted(inner_keys)}"
+            )
+        if not has_cat:
+            errors.append(
+                f"'objects' missing category/label sub-field. Found: {sorted(inner_keys)}"
+            )
+        if not has_bbox and not (inner_keys & {"segmentation", "mask", "masks"}):
+            errors.append("Instance segmentation needs bbox and/or segmentation polygons per object.")
+        return errors
+
+    inst_cols = column_names & {
+        "instance_mask",
+        "instance_masks",
+        "masks",
+        "coco_mask",
+        "png_mask",
+    }
+    if inst_cols:
+        return []
+
+    errors.append(
+        "Instance segmentation expects nested 'objects' with segmentation/mask fields, "
+        f"or a dedicated mask column. Found: {sorted(column_names)}"
+    )
+    return errors
+
+
+def validate_panoptic_segmentation_schema(features: dict, dataset_name: str) -> list[str]:
+    errors: list[str] = []
+    column_names = set(features.keys())
+    if "image" not in column_names:
+        errors.append(f"Missing 'image' column. Found: {sorted(column_names)}")
+        return errors
+
+    panoptic_mask_cols = {c for c in column_names if "panoptic" in c.lower() and "mask" in c.lower()}
+    panoptic_mask_cols |= column_names & {"panoptic_mask", "panoptic_masks", "parsing"}
+    seg_meta = column_names & {"segments", "segments_info", "panoptic_annotations", "categories"}
+
+    if panoptic_mask_cols and seg_meta:
+        return []
+    if panoptic_mask_cols and ("annotation" in column_names or "objects" in column_names):
+        return []
+
+    if not panoptic_mask_cols:
+        errors.append(
+            "Panoptic segmentation requires a panoptic-style RGB-ID mask column "
+            "(e.g. 'panoptic_mask', 'parsing')."
+        )
+    if not seg_meta:
+        errors.append(
+            "Panoptic segmentation requires segment metadata (e.g. 'segments', 'segments_info')."
+        )
+    return errors
+
+
+def validate_depth_schema(features: dict, dataset_name: str) -> list[str]:
+    errors: list[str] = []
+    column_names = set(features.keys())
+    if "image" not in column_names and "rgb" not in column_names:
+        errors.append(
+            f"Depth datasets expect an RGB column ('image' or 'rgb'). Found: {sorted(column_names)}"
+        )
+    depth_cols = column_names & {
+        "depth",
+        "depth_map",
+        "disparity",
+        "label",
+        "target",
+        "depths",
+    }
+    if not depth_cols:
+        errors.append(
+            f"No depth target column found (expected one of: depth, depth_map, disparity, label). "
+            f"Found: {sorted(column_names)}"
+        )
+    return errors
+
+
+def validate_ocr_schema(features: dict, dataset_name: str) -> list[str]:
+    errors: list[str] = []
+    column_names = set(features.keys())
+    if "image" not in column_names:
+        errors.append(f"Missing 'image' column. Found: {sorted(column_names)}")
+    text_cols = column_names & {
+        "text",
+        "words",
+        "transcript",
+        "sentence",
+        "label",
+        "gt",
+        "ocr_text",
+        "ground_truth",
+    }
+    if not text_cols:
+        errors.append(
+            f"No text label column found for OCR (expected text, words, transcript, …). "
+            f"Found: {sorted(column_names)}"
+        )
+    return errors
+
+
+def validate_image_to_image_schema(features: dict, dataset_name: str) -> list[str]:
+    errors: list[str] = []
+    column_names = set(features.keys())
+    input_side = column_names & {"image", "input_image", "lq", "low_resolution", "src", "conditional"}
+    target_side = column_names & {
+        "target_image",
+        "output_image",
+        "hq",
+        "high_resolution",
+        "ground_truth",
+        "gt",
+        "label",
+        "target",
+    }
+    if len(input_side) < 1:
+        errors.append(
+            f"Image-to-image expects an input image column (image, input_image, …). "
+            f"Found: {sorted(column_names)}"
+        )
+    if len(target_side) < 1:
+        errors.append(
+            f"Image-to-image expects a target image column (target_image, hq, label, …). "
+            f"Found: {sorted(column_names)}"
+        )
+    return errors
+
+
+def validate_image_only_schema(features: dict, dataset_name: str) -> list[str]:
+    column_names = set(features.keys())
+    if "image" not in column_names and "pixel_values" not in column_names:
+        return [
+            f"Image-only / masked modeling datasets expect 'image' or 'pixel_values'. "
+            f"Found: {sorted(column_names)}"
+        ]
+    return []
+
+
+def validate_video_schema(features: dict, dataset_name: str) -> list[str]:
+    column_names = set(features.keys())
+    if column_names & {"video", "videos", "clip", "mp4"}:
+        return []
+    if "image" in column_names:
+        return []
+    return [
+        f"Video schema expects a `video`/`videos` column or frame `image` data. "
+        f"Found: {sorted(column_names)}"
+    ]
 
 
 def _try_json(value: Any) -> Any:
@@ -233,7 +413,7 @@ def _try_json(value: Any) -> Any:
         return None
 
 
-def inspect_segmentation_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+def inspect_semantic_segmentation_samples(samples: list[dict], features: dict) -> dict[str, Any]:
     info: dict[str, Any] = {
         "mask_column": None,
         "has_prompt": False,
@@ -243,7 +423,15 @@ def inspect_segmentation_samples(samples: list[dict], features: dict) -> dict[st
     }
     column_names = set(features.keys())
 
-    mask_options = ["mask", "label", "annotation", "segmentation_mask", "masks", "segmentation"]
+    mask_options = [
+        "mask",
+        "label",
+        "annotation",
+        "segmentation_mask",
+        "masks",
+        "segmentation",
+        "semantic_mask",
+    ]
     for col in mask_options:
         if col in column_names:
             info["mask_column"] = col
@@ -286,16 +474,94 @@ def inspect_segmentation_samples(samples: list[dict], features: dict) -> dict[st
     return info
 
 
+def segment_sam_prompt_hub_errors(samples: list[dict], features: dict) -> list[str]:
+    """SAM ``segment`` task requires prompts on the Hub slice (not mask-only)."""
+    if not samples:
+        return []
+    column_names = set(features.keys())
+    prompt_cols = [c for c in column_names if "prompt" in c.lower()]
+    bbox_cols = [c for c in column_names if c in ("bbox", "bboxes", "box", "boxes")]
+    point_cols = [c for c in column_names if c in ("point", "points", "input_point", "input_points")]
+
+    for sample in samples:
+        if prompt_cols:
+            raw = sample.get(prompt_cols[0])
+            parsed = raw if isinstance(raw, dict) else _try_json(raw)
+            if isinstance(parsed, dict) and (
+                "bbox" in parsed or "box" in parsed or "point" in parsed or "points" in parsed
+            ):
+                return []
+        if bbox_cols:
+            v = sample.get(bbox_cols[0])
+            if v is not None and not (isinstance(v, list) and len(v) == 0):
+                return []
+        if point_cols:
+            v = sample.get(point_cols[0])
+            if v is not None and not (isinstance(v, list) and len(v) == 0):
+                return []
+
+    return [
+        "Task 'segment' (SAM/SAM2) requires bbox or point prompts on the dataset; "
+        "only mask/image columns were detected for the inspected rows."
+    ]
+
+
+def inspect_instance_segmentation_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "has_objects": "objects" in set(features.keys()),
+        "warnings": [],
+    }
+    return info
+
+
+def inspect_panoptic_segmentation_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"columns": sorted(features.keys())}
+
+
+def inspect_depth_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"depth_columns": sorted(set(features.keys()) & {"depth", "disparity", "label", "target"})}
+
+
+def inspect_ocr_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"text_columns": sorted(set(features.keys()) & {"text", "words", "transcript", "label"})}
+
+
+def inspect_image_to_image_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"columns": sorted(features.keys())}
+
+
+def inspect_image_only_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"image_only": True}
+
+
+def inspect_video_samples(samples: list[dict], features: dict) -> dict[str, Any]:
+    return {"video_like": bool(set(features.keys()) & {"video", "videos", "clip"})}
+
+
 _SCHEMA_VALIDATORS = {
     "detection": validate_detection_schema,
-    "segmentation": validate_segmentation_schema,
+    "semantic_segmentation": validate_semantic_segmentation_schema,
+    "instance_segmentation": validate_instance_segmentation_schema,
+    "panoptic_segmentation": validate_panoptic_segmentation_schema,
     "classification": validate_classification_schema,
+    "depth": validate_depth_schema,
+    "ocr": validate_ocr_schema,
+    "image_to_image": validate_image_to_image_schema,
+    "image_only": validate_image_only_schema,
+    "video": validate_video_schema,
 }
 
 _SCHEMA_INSPECTORS = {
     "detection": inspect_detection_samples,
-    "segmentation": inspect_segmentation_samples,
+    "semantic_segmentation": inspect_semantic_segmentation_samples,
+    "instance_segmentation": inspect_instance_segmentation_samples,
+    "panoptic_segmentation": inspect_panoptic_segmentation_samples,
     "classification": inspect_classification_samples,
+    "depth": inspect_depth_samples,
+    "ocr": inspect_ocr_samples,
+    "image_to_image": inspect_image_to_image_samples,
+    "image_only": inspect_image_only_samples,
+    "video": inspect_video_samples,
 }
 
 
@@ -367,7 +633,9 @@ def validate_hf_hub(
         return to_validation_report(p, dataset_config=config)
 
     column_names = list(features.keys())
-    errors = validator(features, dataset_name)
+    errors = list(validator(features, dataset_name))
+    if task_type == "segment":
+        errors.extend(segment_sam_prompt_hub_errors(samples, features))
 
     num_rows = -1
     try:

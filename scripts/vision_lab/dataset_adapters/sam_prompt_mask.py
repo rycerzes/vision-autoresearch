@@ -61,6 +61,7 @@ def validate_sam_prompt_mask(root: Path) -> dict[str, Any]:
         out["errors"] = list(dict.fromkeys(out.get("errors", []) + errors))
         out["valid"] = len(out["errors"]) == 0
     out["adapter_id"] = "sam_prompt_mask"
+    out["dataset_schema_kind"] = "semantic_segmentation"
     out["required_fields"] = list(
         dict.fromkeys((out.get("required_fields") or []) + ["prompts or bbox jsonl"])
     )

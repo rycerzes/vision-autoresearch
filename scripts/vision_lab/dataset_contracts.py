@@ -7,25 +7,47 @@ from typing import Any
 
 from vision_lab.task_registry import TASK_BY_ID
 
-# Primary HF-style schema kinds used by TaskSpec.dataset_schema_kind
-KNOWN_SCHEMA_KINDS = frozenset({"detection", "classification", "segmentation"})
+# First-class schema kinds (no legacy "known" vs "extended" split).
+ALL_SCHEMA_KINDS: frozenset[str] = frozenset(
+    {
+        "classification",
+        "detection",
+        "semantic_segmentation",
+        "instance_segmentation",
+        "panoptic_segmentation",
+        "depth",
+        "ocr",
+        "image_to_image",
+        "image_only",
+        "video",
+    }
+)
 
-# Non-HF schema kinds adapters may emit (no registered task yet — preflight blocks mismatch).
-EXTENDED_SCHEMA_KINDS = frozenset({"video", "ocr", "depth", "image_to_image"})
+# Local adapters whose schema kind is inferred only after filesystem validation.
+DYNAMIC_SCHEMA_LOCAL_ADAPTERS: frozenset[str] = frozenset({"yolo_folder"})
 
 # Maps adapter id → dataset schema kind satisfied by validated layouts.
 ADAPTER_SCHEMA_KIND: dict[str, str] = {
     "hf_hub": "dynamic",  # resolved per task / HF features
     "coco_json": "detection",
-    "yolo_folder": "detection",
     "voc_xml": "detection",
-    "semantic_masks": "segmentation",
-    "sam_prompt_mask": "segmentation",
+    "semantic_masks": "semantic_segmentation",
+    "sam_prompt_mask": "semantic_segmentation",
     "video_folder": "video",
     "ocr_table": "ocr",
     "depth_pairs": "depth",
     "image_pairs": "image_to_image",
 }
+
+
+def assert_task_specs_use_declared_schema_kinds() -> None:
+    """Every registered task must use a schema kind from ALL_SCHEMA_KINDS."""
+    for tid, spec in TASK_BY_ID.items():
+        if spec.dataset_schema_kind not in ALL_SCHEMA_KINDS:
+            raise RuntimeError(
+                f"Task {tid!r}: dataset_schema_kind {spec.dataset_schema_kind!r} is not in "
+                f"ALL_SCHEMA_KINDS ({sorted(ALL_SCHEMA_KINDS)})."
+            )
 
 
 def schema_kind_for_adapter(adapter_id: str) -> str | None:
@@ -51,14 +73,13 @@ def preflight_adapter_matches_task(adapter_id: str, task_id: str) -> tuple[bool,
     spec = TASK_BY_ID[task_id]
     if adapter_id in ("auto", "hf_hub"):
         return True, None
+    if adapter_id in DYNAMIC_SCHEMA_LOCAL_ADAPTERS:
+        return True, None
     fixed = schema_kind_for_adapter(adapter_id)
     if fixed is None:
         return False, f"unknown dataset adapter: {adapter_id!r}"
-    if fixed not in KNOWN_SCHEMA_KINDS:
-        return False, (
-            f"adapter {adapter_id!r} targets schema {fixed!r}; "
-            f"no registered task uses that schema yet (supported: {sorted(KNOWN_SCHEMA_KINDS)})"
-        )
+    if fixed not in ALL_SCHEMA_KINDS:
+        return False, f"internal error: adapter {adapter_id!r} maps to unknown schema {fixed!r}"
     if spec.dataset_schema_kind != fixed:
         return False, (
             f"task {task_id!r} expects dataset_schema_kind={spec.dataset_schema_kind!r} "
@@ -68,11 +89,9 @@ def preflight_adapter_matches_task(adapter_id: str, task_id: str) -> tuple[bool,
 
 
 def compatible_tasks_for_schema_kind(kind: str) -> list[str]:
-    if kind in EXTENDED_SCHEMA_KINDS:
+    if kind not in ALL_SCHEMA_KINDS:
         return []
-    if kind in KNOWN_SCHEMA_KINDS:
-        return tasks_compatible_with_schema_kind(kind)
-    return []
+    return tasks_compatible_with_schema_kind(kind)
 
 
 @dataclass
@@ -100,6 +119,12 @@ def to_validation_report(
 ) -> dict[str, Any]:
     """Single canonical shape for ``validate_dataset`` / CLI JSON."""
     deduped_errors = list(dict.fromkeys(partial.errors))
+    kind = partial.dataset_schema_kind
+    if kind and kind not in ALL_SCHEMA_KINDS:
+        deduped_errors.append(
+            f"Resolved dataset_schema_kind {kind!r} is not a declared schema kind "
+            f"({sorted(ALL_SCHEMA_KINDS)})."
+        )
     return {
         "valid": len(deduped_errors) == 0,
         "errors": deduped_errors,
@@ -117,3 +142,6 @@ def to_validation_report(
         "inspection": partial.inspection,
         "cache_manifest_path": cache_manifest_path,
     }
+
+
+assert_task_specs_use_declared_schema_kinds()

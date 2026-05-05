@@ -16,18 +16,14 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import yaml
 
 from vision_lab.promotion import assert_summary_eligible_for_recording, load_promotion_policy
-from vision_lab.summary_schema import (
-    NUMERIC_SUMMARY_KEYS,
-    STRING_SUMMARY_KEYS,
-    accept_summary_line_key,
-)
+from vision_lab.summary_schema import NUMERIC_COERCION_KEYS, STRING_SUMMARY_KEYS, accept_summary_line_key
 
 
 def coerce_summary_value(raw: str, key: str) -> int | float | str:
     raw = raw.strip()
     if key in STRING_SUMMARY_KEYS:
         return raw
-    if key in NUMERIC_SUMMARY_KEYS:
+    if key in NUMERIC_COERCION_KEYS:
         for caster in (int, float):
             try:
                 return caster(raw)

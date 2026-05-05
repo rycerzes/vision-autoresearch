@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from vision_lab.metrics import (
+    MetricDirection,
+    assert_standard_metric_name,
+    direction_for_standard_metric,
+)
+
 
 def _m(*names: str) -> frozenset[str]:
     return frozenset(names)
@@ -22,84 +28,144 @@ class TaskSpec:
     """HF dataset column contract (see ``vision_lab.dataset_validation``)."""
     primary_metric: str
     """Standard summary key used as default promotion primary."""
-    allowed_promotion_metrics: frozenset[str]
-    """Metrics allowed in ``promotion`` (primary, secondary, gates, tie_breakers)."""
+    metric_direction: MetricDirection
+    """Default direction for ``primary_metric`` (must match ``STANDARD_METRICS``)."""
+    allowed_primary_metrics: frozenset[str]
+    """Metrics allowed as ``promotion.primary``."""
+    allowed_secondary_metrics: frozenset[str]
+    """Metrics allowed as ``promotion.secondary`` (empty means secondary must be omitted)."""
+    allowed_gate_metrics: frozenset[str]
+    """Metrics allowed in ``promotion.gates[].metric``."""
+    allowed_tie_breaker_metrics: frozenset[str]
+    """Metrics allowed in ``promotion.tie_breakers``."""
+    allowed_auxiliary_summary_keys: frozenset[str] = frozenset()
+    """Non-standard summary keys permitted for this task (e.g. ``dice`` on ``segment``)."""
     trainable: bool = True
     evaluable: bool = True
 
+    def promotion_metrics_union(self) -> frozenset[str]:
+        """All standard metric names that may appear anywhere in the promotion block."""
+        return (
+            self.allowed_primary_metrics
+            | self.allowed_secondary_metrics
+            | self.allowed_gate_metrics
+            | self.allowed_tie_breaker_metrics
+        )
+
+
+def _task(
+    *,
+    id: str,
+    backend: str,
+    train_script: str,
+    dataset_schema_kind: str,
+    primary_metric: str,
+    metric_direction: MetricDirection,
+    promotion_metrics: frozenset[str],
+    allowed_auxiliary_summary_keys: frozenset[str] = frozenset(),
+    trainable: bool = True,
+    evaluable: bool = True,
+) -> TaskSpec:
+    """Register a task where the same metric set is valid for every promotion role."""
+    return TaskSpec(
+        id=id,
+        backend=backend,
+        train_script=train_script,
+        dataset_schema_kind=dataset_schema_kind,
+        primary_metric=primary_metric,
+        metric_direction=metric_direction,
+        allowed_primary_metrics=promotion_metrics,
+        allowed_secondary_metrics=promotion_metrics,
+        allowed_gate_metrics=promotion_metrics,
+        allowed_tie_breaker_metrics=promotion_metrics,
+        allowed_auxiliary_summary_keys=allowed_auxiliary_summary_keys,
+        trainable=trainable,
+        evaluable=evaluable,
+    )
+
 
 _TASKS: tuple[TaskSpec, ...] = (
-    TaskSpec(
+    _task(
         id="detect",
         backend="transformers",
         train_script="train_detect.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
-        allowed_promotion_metrics=_m("mAP", "mAP_50"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mAP", "mAP_50"),
     ),
-    TaskSpec(
+    _task(
         id="classify",
         backend="transformers",
         train_script="train_classify.py",
         dataset_schema_kind="classification",
         primary_metric="accuracy",
-        allowed_promotion_metrics=_m("accuracy"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("accuracy"),
     ),
-    TaskSpec(
+    _task(
         id="segment",
         backend="transformers",
         train_script="train_segment.py",
         dataset_schema_kind="segmentation",
         primary_metric="mIoU",
-        allowed_promotion_metrics=_m("mIoU"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mIoU"),
+        allowed_auxiliary_summary_keys=_m("dice"),
     ),
-    TaskSpec(
+    _task(
         id="detect_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
-        allowed_promotion_metrics=_m("mAP", "mAP_50"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mAP", "mAP_50"),
     ),
-    TaskSpec(
+    _task(
         id="track_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
-        allowed_promotion_metrics=_m("mAP", "mAP_50"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mAP", "mAP_50"),
     ),
-    TaskSpec(
+    _task(
         id="segment_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="segmentation",
         primary_metric="mask_map",
-        allowed_promotion_metrics=_m("mask_map"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mask_map"),
     ),
-    TaskSpec(
+    _task(
         id="classify_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="classification",
         primary_metric="accuracy",
-        allowed_promotion_metrics=_m("accuracy"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("accuracy"),
     ),
-    TaskSpec(
+    _task(
         id="pose_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
-        allowed_promotion_metrics=_m("mAP", "mAP_50"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mAP", "mAP_50"),
     ),
-    TaskSpec(
+    _task(
         id="obb_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
-        allowed_promotion_metrics=_m("mAP", "mAP_50"),
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mAP", "mAP_50"),
     ),
 )
 
@@ -150,4 +216,27 @@ def assert_estimates_complete() -> None:
         )
 
 
+def _assert_task_metric_contracts() -> None:
+    """Every registered task must reference only standard metrics with consistent defaults."""
+    for t in _TASKS:
+        assert_standard_metric_name(t.primary_metric)
+        if t.primary_metric not in t.allowed_primary_metrics:
+            raise RuntimeError(
+                f"Task {t.id!r}: primary_metric {t.primary_metric!r} must be in allowed_primary_metrics."
+            )
+        if direction_for_standard_metric(t.primary_metric) != t.metric_direction:
+            raise RuntimeError(
+                f"Task {t.id!r}: metric_direction {t.metric_direction!r} disagrees with "
+                f"STANDARD_METRICS for primary_metric {t.primary_metric!r}."
+            )
+        for m in t.promotion_metrics_union():
+            assert_standard_metric_name(m)
+        for m in t.allowed_auxiliary_summary_keys:
+            if m in t.promotion_metrics_union():
+                raise RuntimeError(
+                    f"Task {t.id!r}: auxiliary summary key {m!r} duplicates a promotion metric."
+                )
+
+
+_assert_task_metric_contracts()
 assert_estimates_complete()

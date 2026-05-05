@@ -11,7 +11,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from vision_lab.metrics import STANDARD_METRICS, MetricDirection, direction_for_standard_metric
+from vision_lab.metrics import MetricDirection, assert_standard_metric_name, direction_for_standard_metric
+from vision_lab.summary_schema import validate_summary_keys_for_task
 from vision_lab.task_registry import TASK_BY_ID, get_task, promotion_metric_for_task
 
 
@@ -71,16 +72,23 @@ def _default_direction_for_metric(metric: str) -> MetricDirection:
 
 
 def _assert_metric_allowed_for_task(task_id: str, metric: str, role: str) -> None:
+    assert_standard_metric_name(metric)
     spec = get_task(task_id)
-    if metric not in STANDARD_METRICS:
-        raise ValueError(
-            f"promotion {role} metric {metric!r} is not a standard metric name "
-            f"(allowed keys: {', '.join(sorted(STANDARD_METRICS))})."
-        )
-    if metric not in spec.allowed_promotion_metrics:
+    role_allowed: frozenset[str]
+    if role == "primary":
+        role_allowed = spec.allowed_primary_metrics
+    elif role == "secondary":
+        role_allowed = spec.allowed_secondary_metrics
+    elif role == "gates":
+        role_allowed = spec.allowed_gate_metrics
+    elif role == "tie_breakers":
+        role_allowed = spec.allowed_tie_breaker_metrics
+    else:
+        raise AssertionError(f"unknown promotion role: {role!r}")
+    if metric not in role_allowed:
         raise ValueError(
             f"promotion {role} metric {metric!r} is not allowed for task {task_id!r} "
-            f"(allowed: {', '.join(sorted(spec.allowed_promotion_metrics))})."
+            f"(allowed for this role: {', '.join(sorted(role_allowed))})."
         )
 
 
@@ -95,23 +103,38 @@ def validate_promotion_policy_for_task(task_id: str, policy: PromotionPolicy) ->
         _assert_metric_allowed_for_task(task_id, tb, "tie_breakers")
 
 
-def assert_summary_eligible_for_recording(
+def promotion_dependency_metric_names(policy: PromotionPolicy) -> tuple[str, ...]:
+    """Metrics referenced by the resolved promotion policy (deduped, stable order)."""
+    ordered: list[str] = [policy.primary]
+    if policy.secondary:
+        ordered.append(policy.secondary)
+    ordered.extend(g.metric for g in policy.gates)
+    ordered.extend(policy.tie_breakers)
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in ordered:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return tuple(out)
+
+
+def _require_numeric_summary_metric(
+    summary_metrics: Mapping[str, Any],
+    metric: str,
     *,
     task_id: str,
-    policy: PromotionPolicy,
-    summary_metrics: Mapping[str, Any],
+    role: str,
 ) -> None:
-    """Require the resolved primary metric to be present and numeric (strict recording gate)."""
-    validate_promotion_policy_for_task(task_id, policy)
-    raw = summary_metrics.get(policy.primary)
+    raw = summary_metrics.get(metric)
     if raw is None:
         raise ValueError(
-            f"Summary is missing required primary metric {policy.primary!r} for task {task_id!r}; "
-            "runs without the task headline metric are not recorded."
+            f"Summary is missing {role} metric {metric!r} for task {task_id!r}; "
+            "runs without every promotion dependency metric are not recorded."
         )
     if isinstance(raw, bool):
         raise ValueError(
-            f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+            f"{role.capitalize()} metric {metric!r} must be numeric in the summary; got {raw!r}."
         )
     if isinstance(raw, (int, float)):
         return
@@ -120,12 +143,42 @@ def assert_summary_eligible_for_recording(
             float(raw)
         except ValueError:
             raise ValueError(
-                f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+                f"{role.capitalize()} metric {metric!r} must be numeric in the summary; got {raw!r}."
             ) from None
         return
     raise ValueError(
-        f"Primary metric {policy.primary!r} must be numeric in the summary; got {raw!r}."
+        f"{role.capitalize()} metric {metric!r} must be numeric in the summary; got {raw!r}."
     )
+
+
+def assert_summary_eligible_for_recording(
+    *,
+    task_id: str,
+    policy: PromotionPolicy,
+    summary_metrics: Mapping[str, Any],
+) -> None:
+    """Require every promotion dependency metric to be present and numeric (strict recording gate)."""
+    validate_summary_keys_for_task(task_id, summary_metrics)
+    validate_promotion_policy_for_task(task_id, policy)
+
+    secondary_set = {policy.secondary} if policy.secondary else set()
+    gate_set = {g.metric for g in policy.gates}
+    tb_set = set(policy.tie_breakers)
+
+    for name in promotion_dependency_metric_names(policy):
+        if name == policy.primary:
+            role = "promotion primary"
+        elif name in secondary_set:
+            role = "promotion secondary"
+        elif name in gate_set:
+            role = "promotion gate"
+        elif name in tb_set:
+            role = "promotion tie_breaker"
+        else:
+            role = "promotion"
+        _require_numeric_summary_metric(
+            summary_metrics, name, task_id=task_id, role=role
+        )
 
 
 def _task_default_policy(task_id: str) -> PromotionPolicy:
@@ -179,6 +232,11 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
 
     sec = block.get("secondary")
     secondary = str(sec).strip() if sec not in (None, "") else None
+    spec = get_task(task_id)
+    if secondary and not spec.allowed_secondary_metrics:
+        raise ValueError(
+            f"promotion.secondary is set but task {task_id!r} does not allow a secondary metric."
+        )
 
     gates_raw = block.get("gates") or []
     if not isinstance(gates_raw, list):
@@ -206,6 +264,11 @@ def load_promotion_policy(config_data: Mapping[str, Any], *, task_id: str) -> Pr
     if not isinstance(tb_raw, list):
         raise ValueError("promotion.tie_breakers must be a list of metric names")
     tie_breakers = tuple(str(x).strip() for x in tb_raw if str(x).strip())
+
+    if tie_breakers and not spec.allowed_tie_breaker_metrics:
+        raise ValueError(
+            f"promotion.tie_breakers is set but task {task_id!r} does not allow tie-breaker metrics."
+        )
 
     policy = PromotionPolicy(
         primary=primary,

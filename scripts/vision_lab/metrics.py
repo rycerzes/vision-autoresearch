@@ -1,4 +1,9 @@
-"""Task-aware standard metric names and directions for promotion and log parsing."""
+"""Task-aware standard metric names and directions for promotion and log parsing.
+
+The global catalog ``STANDARD_METRICS`` defines canonical names and higher/lower
+semantics. Which of those names may headline promotion or appear in summaries for
+a given benchmark is declared per task in ``vision_lab.task_registry.TaskSpec``.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ class MetricSpec:
     """Human-readable label in dashboards; defaults to the metric key."""
 
 
-# Standard headline metrics only (forward-only contract).
+# Standard headline metrics only (forward-only contract). No aliases or legacy keys.
 STANDARD_METRICS: dict[str, MetricSpec] = {
     "accuracy": MetricSpec(MetricDirection.HIGHER),
     "mAP": MetricSpec(MetricDirection.HIGHER, display_name="mAP"),
@@ -41,8 +46,19 @@ STANDARD_METRICS: dict[str, MetricSpec] = {
     "reconstruction_loss": MetricSpec(MetricDirection.LOWER),
 }
 
+STANDARD_METRIC_NAMES: frozenset[str] = frozenset(STANDARD_METRICS.keys())
+
 # Back-compat alias for trainers and tooling that import ``METRICS``.
 METRICS = STANDARD_METRICS
+
+
+def assert_standard_metric_name(metric: str) -> None:
+    """Raise if ``metric`` is not a registered standard headline name."""
+    if metric not in STANDARD_METRICS:
+        raise ValueError(
+            f"Metric {metric!r} is not a standard metric name "
+            f"(allowed: {', '.join(sorted(STANDARD_METRICS))})."
+        )
 
 
 def higher_is_better_metric_names() -> frozenset[str]:
@@ -64,7 +80,5 @@ def lower_is_better_metric_names() -> frozenset[str]:
 
 def direction_for_standard_metric(metric: str) -> MetricDirection:
     """Return promotion direction for a standard metric key."""
-    spec = STANDARD_METRICS.get(metric)
-    if spec is None:
-        raise ValueError(f"Metric {metric!r} is not a standard metric (see STANDARD_METRICS).")
-    return spec.direction
+    assert_standard_metric_name(metric)
+    return STANDARD_METRICS[metric].direction

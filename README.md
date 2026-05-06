@@ -4,6 +4,12 @@ Multi-agent experiment loop for vision model finetuning. Adapted from [multiauto
 
 Agents propose a hypothesis, change one config knob, run a finetune, and auto-promote when the metric beats the current master. Works locally on consumer GPUs or on HF Jobs.
 
+The lab supports two first-class training backends. `train_hf_vision.py` runs
+Transformers vision task heads and representation loaders for Hugging Face model
+families. `train_ultralytics.py` runs YOLO-family models through Ultralytics. Task
+ids describe benchmark contracts and headline metrics; backend/model-loader
+choices describe how a particular model family is trained.
+
 ## Tasks
 
 | Task | Script | Default Model | Dataset | Headline metric |
@@ -12,7 +18,9 @@ Agents propose a hypothesis, change one config knob, run a finetune, and auto-pr
 | Detect | `train_hf_vision.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
 | Segment | `train_hf_vision.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
 
-Classification configs set `model_loader` and `adaptation_mode` (see `configs/base_classify.yaml`).
+Transformers configs set `model_loader` and `adaptation_mode`. `classify` supports
+`auto_task_head`, `auto_model`, and `auto_backbone`; `detect` and `segment` use
+`auto_task_head` until representation heads/evaluators are added for those tasks.
 
 Ultralytics (`train_ultralytics.py`): `detect_yolo` / `track_yolo` / `pose_yolo` / `obb_yolo` default to `mAP` (with `mAP_50` allowed in `promotion:`); `segment_yolo` uses `mask_map`; `classify_yolo` uses `accuracy`.
 

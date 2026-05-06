@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from vision_lab.hf_vision.constants import ADAPTATION_MODE_CHOICES, MODEL_LOADER_CHOICES
+from vision_lab.hf_vision.constants import (
+    ADAPTATION_MODE_CHOICES,
+    MODEL_LOADER_CHOICES,
+    MODEL_LOADER_CHOICES_BY_TASK,
+)
 from vision_lab.promotion import load_promotion_policy
 from vision_lab.task_registry import TASK_BY_ID
 
@@ -76,6 +80,12 @@ def verify_hf_vision_yaml(cfg: dict[str, Any], task: str) -> tuple[list[str], li
             errors.append(
                 f"model_loader={ml!r} is not supported (expected one of {sorted(MODEL_LOADER_CHOICES)})."
             )
+        else:
+            task_loader_choices = MODEL_LOADER_CHOICES_BY_TASK.get(task, MODEL_LOADER_CHOICES)
+            if ml and ml not in task_loader_choices:
+                errors.append(
+                    f"task {task!r} supports model_loader values {sorted(task_loader_choices)}, not {ml!r}."
+                )
     elif ml is not None:
         errors.append(f"model_loader must be a string, got {type(ml).__name__}.")
 

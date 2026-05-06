@@ -29,5 +29,13 @@ ROUTED_TASK_IDS: frozenset[str] = frozenset({"classify", "detect", "segment"})
 # Tasks built via ``vision_lab.hf_vision.loaders.load_hf_vision_model``.
 TASKS_USING_SHARED_MODEL_LOADER: frozenset[str] = ROUTED_TASK_IDS
 
+# Loader choices are task-scoped. Representation loaders currently have a real
+# probe head and standard metric only for classification.
+MODEL_LOADER_CHOICES_BY_TASK: dict[str, frozenset[str]] = {
+    "classify": MODEL_LOADER_CHOICES,
+    "detect": frozenset({"auto_task_head"}),
+    "segment": frozenset({"auto_task_head"}),
+}
+
 # Alias used by ``loaders.py`` and ``train_hf_vision.py``.
 HF_VISION_SUPPORTED_TASKS = TASKS_USING_SHARED_MODEL_LOADER

@@ -20,7 +20,11 @@ from transformers import (
 )
 from transformers.modeling_outputs import SequenceClassifierOutput
 
-from vision_lab.hf_vision.constants import HF_VISION_SUPPORTED_TASKS, MODEL_LOADER_CHOICES
+from vision_lab.hf_vision.constants import (
+    HF_VISION_SUPPORTED_TASKS,
+    MODEL_LOADER_CHOICES,
+    MODEL_LOADER_CHOICES_BY_TASK,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,11 @@ def load_hf_vision_model(
     ml = model_loader.strip()
     if ml not in MODEL_LOADER_CHOICES:
         raise ValueError(f"Unknown model_loader {model_loader!r}; expected one of {sorted(MODEL_LOADER_CHOICES)}.")
+    task_loader_choices = MODEL_LOADER_CHOICES_BY_TASK.get(task_type, MODEL_LOADER_CHOICES)
+    if ml not in task_loader_choices:
+        raise ValueError(
+            f"task_type={task_type!r} supports model_loader values {sorted(task_loader_choices)}, not {ml!r}."
+        )
 
     common = _common_pretrained_kwargs(
         cache_dir=cache_dir,

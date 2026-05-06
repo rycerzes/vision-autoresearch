@@ -172,11 +172,13 @@ def apply_adaptation_mode(
     if arch == "detect":
         _apply_detect(model, mode)
         return
-    if arch == "segment":
+    if arch in ("segment", "semantic_segment"):
         _apply_segment(model, mode)
         return
     if arch == "classify":
         _apply_classify(model, mode)
         return
 
-    raise ValueError(f"Unknown architecture {architecture!r} (expected classify, detect, segment).")
+    raise ValueError(
+        f"Unknown architecture {architecture!r} (expected classify, detect, segment, semantic_segment)."
+    )

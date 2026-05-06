@@ -17,6 +17,7 @@ from transformers import (
     AutoModel,
     AutoModelForImageClassification,
     AutoModelForObjectDetection,
+    AutoModelForSemanticSegmentation,
 )
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -215,6 +216,74 @@ def load_hf_vision_model(
             **common,
         )
         model = AutoModelForObjectDetection.from_pretrained(
+            model_name_or_path,
+            config=config,
+            ignore_mismatched_sizes=ignore_mismatched_sizes,
+            **common,
+        )
+        return model, image_processor
+
+    if task_type == "semantic_segment":
+        if ml != "auto_task_head":
+            raise ValueError(f"semantic_segment supports model_loader=auto_task_head only, not {ml!r}")
+        config = AutoConfig.from_pretrained(
+            cfg_id,
+            num_labels=num_labels,
+            label2id=label2id,
+            id2label=id2label,
+            **common,
+        )
+        model = AutoModelForSemanticSegmentation.from_pretrained(
+            model_name_or_path,
+            config=config,
+            ignore_mismatched_sizes=ignore_mismatched_sizes,
+            **common,
+        )
+        return model, image_processor
+
+    if task_type == "instance_segment":
+        if ml != "auto_task_head":
+            raise ValueError(f"instance_segment supports model_loader=auto_task_head only, not {ml!r}")
+        try:
+            from transformers import AutoModelForInstanceSegmentation
+        except ImportError as exc:
+            raise ValueError(
+                "This Transformers version does not expose AutoModelForInstanceSegmentation; "
+                "upgrade transformers or use a supported dense segmentation checkpoint."
+            ) from exc
+        config = AutoConfig.from_pretrained(
+            cfg_id,
+            num_labels=num_labels,
+            label2id=label2id,
+            id2label=id2label,
+            **common,
+        )
+        model = AutoModelForInstanceSegmentation.from_pretrained(
+            model_name_or_path,
+            config=config,
+            ignore_mismatched_sizes=ignore_mismatched_sizes,
+            **common,
+        )
+        return model, image_processor
+
+    if task_type == "universal_segment":
+        if ml != "auto_task_head":
+            raise ValueError(f"universal_segment supports model_loader=auto_task_head only, not {ml!r}")
+        try:
+            from transformers import AutoModelForUniversalSegmentation
+        except ImportError as exc:
+            raise ValueError(
+                "This Transformers version does not expose AutoModelForUniversalSegmentation; "
+                "upgrade transformers or use a supported universal segmentation checkpoint."
+            ) from exc
+        config = AutoConfig.from_pretrained(
+            cfg_id,
+            num_labels=num_labels,
+            label2id=label2id,
+            id2label=id2label,
+            **common,
+        )
+        model = AutoModelForUniversalSegmentation.from_pretrained(
             model_name_or_path,
             config=config,
             ignore_mismatched_sizes=ignore_mismatched_sizes,

@@ -1,0 +1,48 @@
+# Base config for semantic segmentation (Transformers backend)
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: semantic_segment
+backend: transformers
+
+model_loader: auto_task_head
+adaptation_mode: full_finetune
+
+# Model
+model_name_or_path: nvidia/segformer-b0-finetuned-ade-512-512
+
+# Dataset (must be on HF Hub with image + semantic mask columns)
+dataset_name: segments/sidewalk-semantic
+train_split: train
+eval_split: validation
+image_column_name: image
+mask_column_name: label
+
+# Training
+num_train_epochs: 20
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 0.1
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 4
+fp16: true
+dataloader_num_workers: 4
+do_train: true
+do_eval: true
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: true
+metric_for_best_model: eval_mIoU
+greater_is_better: true
+
+# Promotion (submit_patch ledger / local master)
+promotion:
+  primary: mIoU
+  direction: higher
+  min_delta: 0.0
+
+# Hub
+push_to_hub: false

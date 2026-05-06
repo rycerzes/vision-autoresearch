@@ -17,10 +17,17 @@ choices describe how a particular model family is trained.
 | Classify | `train_hf_vision.py` | `google/vit-base-patch16-224` | food101 | `accuracy` |
 | Detect | `train_hf_vision.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
 | Segment | `train_hf_vision.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
+| Semantic segment | `train_hf_vision.py` | `nvidia/segformer-b0-finetuned-ade-512-512` | sidewalk-semantic | `mIoU` |
+| Instance segment | `train_hf_vision.py` | `facebook/mask2former-swin-tiny-coco-instance` | — | `mask_map` |
+| Universal segment | `train_hf_vision.py` | `facebook/mask2former-swin-tiny-coco-panoptic` | — | `pq` |
 
 Transformers configs set `model_loader` and `adaptation_mode`. `classify` supports
-`auto_task_head`, `auto_model`, and `auto_backbone`; `detect` and `segment` use
+`auto_task_head`, `auto_model`, and `auto_backbone`; `detect`, `segment`, and
+`semantic_segment`, `instance_segment`, and `universal_segment` use
 `auto_task_head` until representation heads/evaluators are added for those tasks.
+Dense instance/universal segmentation expects an `annotation` column that is a
+2-channel semantic-id / instance-id mask, matching the Transformers
+Mask2Former-style preprocessing path.
 
 Ultralytics (`train_ultralytics.py`): `detect_yolo` / `track_yolo` / `pose_yolo` / `obb_yolo` default to `mAP` (with `mAP_50` allowed in `promotion:`); `segment_yolo` uses `mask_map`; `classify_yolo` uses `accuracy`.
 
@@ -98,7 +105,10 @@ use_albumentations (detect), prompt_type (segment)
 ├── configs/
 │   ├── base_classify.yaml
 │   ├── base_detect.yaml
-│   └── base_segment.yaml
+│   ├── base_instance_segment.yaml
+│   ├── base_segment.yaml
+│   ├── base_semantic_segment.yaml
+│   └── base_universal_segment.yaml
 ├── train_hf_vision.py         # stable — classify, detect, segment (do not edit)
 ├── prepare.py                 # dataset validation CLI (vision_lab.dataset_validation)
 ├── scripts/

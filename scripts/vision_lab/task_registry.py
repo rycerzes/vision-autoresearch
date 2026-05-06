@@ -114,6 +114,33 @@ _TASKS: tuple[TaskSpec, ...] = (
         allowed_auxiliary_summary_keys=_m("dice"),
     ),
     _task(
+        id="semantic_segment",
+        backend="transformers",
+        train_script="train_hf_vision.py",
+        dataset_schema_kind="semantic_segmentation",
+        primary_metric="mIoU",
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mIoU"),
+    ),
+    _task(
+        id="instance_segment",
+        backend="transformers",
+        train_script="train_hf_vision.py",
+        dataset_schema_kind="instance_segmentation",
+        primary_metric="mask_map",
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("mask_map", "mAP", "mAP_50"),
+    ),
+    _task(
+        id="universal_segment",
+        backend="transformers",
+        train_script="train_hf_vision.py",
+        dataset_schema_kind="panoptic_segmentation",
+        primary_metric="pq",
+        metric_direction=MetricDirection.HIGHER,
+        promotion_metrics=_m("pq", "sq", "rq"),
+    ),
+    _task(
         id="detect_yolo",
         backend="ultralytics",
         train_script="train_ultralytics.py",
@@ -182,6 +209,9 @@ ESTIMATED_MINUTES_BY_TASK: dict[str, dict[str, int]] = {
     "classify_yolo": {"small": 10, "medium": 30, "large": 90},
     "classify": {"small": 10, "medium": 30, "large": 90},
     "segment": {"small": 20, "medium": 60, "large": 180},
+    "semantic_segment": {"small": 20, "medium": 60, "large": 180},
+    "instance_segment": {"small": 25, "medium": 75, "large": 210},
+    "universal_segment": {"small": 30, "medium": 90, "large": 240},
 }
 
 

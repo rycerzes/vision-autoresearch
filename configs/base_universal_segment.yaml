@@ -1,0 +1,50 @@
+# Base config for universal / panoptic segmentation (Transformers backend)
+# Experiments modify this file; training scripts are stable infrastructure.
+
+task_type: universal_segment
+backend: transformers
+
+model_loader: auto_task_head
+adaptation_mode: full_finetune
+
+# Model
+model_name_or_path: facebook/mask2former-swin-tiny-coco-panoptic
+
+# Dataset (must provide image + panoptic mask and segments metadata)
+dataset_name: ""
+train_split: train
+eval_split: validation
+image_column_name: image
+annotation_column_name: annotation
+image_height: 512
+image_width: 512
+
+# Training
+num_train_epochs: 20
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 2
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 0.1
+lr_scheduler_type: cosine
+gradient_accumulation_steps: 8
+fp16: true
+dataloader_num_workers: 4
+do_train: true
+do_eval: true
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+load_best_model_at_end: true
+metric_for_best_model: eval_pq
+greater_is_better: true
+
+# Promotion (submit_patch ledger / local master)
+promotion:
+  primary: pq
+  direction: higher
+  min_delta: 0.0
+
+# Hub
+push_to_hub: false

@@ -32,6 +32,9 @@ Supported tasks:
 - `detect` — object detection via `train_hf_vision.py` and `AutoModelForObjectDetection` (DETR / D-FINE / RT-DETR / YOLOS)
 - `classify` — image classification via `train_hf_vision.py` (`model_loader`, `adaptation_mode`; `configs/base_classify.yaml`)
 - `segment` — prompt segmentation via `train_hf_vision.py` and SAM / SAM2 task heads
+- `semantic_segment` — dense semantic segmentation via `train_hf_vision.py` and `AutoModelForSemanticSegmentation`
+- `instance_segment` — instance segmentation via `train_hf_vision.py` (`mask_map`)
+- `universal_segment` — panoptic/universal segmentation via `train_hf_vision.py` (`pq`)
 - `detect_yolo` — Ultralytics YOLO detection via `train_ultralytics.py` (YOLO-World / RT-DETR via `YOLO()`, YOLOE via bridge; YOLO-NAS is not trainable in Ultralytics)
 - `track_yolo` — Ultralytics detector training via `train_ultralytics.py` (tracking uses inference-time trackers)
 - `segment_yolo` — Ultralytics YOLO segmentation via `train_ultralytics.py` (HF mask column → YOLO labels)

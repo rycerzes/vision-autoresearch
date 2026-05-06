@@ -18,6 +18,7 @@ from transformers import (
     AutoModelForImageClassification,
     AutoModelForObjectDetection,
     AutoModelForSemanticSegmentation,
+    AutoModelForUniversalSegmentation,
 )
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -241,16 +242,11 @@ def load_hf_vision_model(
         )
         return model, image_processor
 
-    if task_type == "instance_segment":
+    if task_type in ("instance_segment", "universal_segment"):
         if ml != "auto_task_head":
-            raise ValueError(f"instance_segment supports model_loader=auto_task_head only, not {ml!r}")
-        try:
-            from transformers import AutoModelForInstanceSegmentation
-        except ImportError as exc:
             raise ValueError(
-                "This Transformers version does not expose AutoModelForInstanceSegmentation; "
-                "upgrade transformers or use a supported dense segmentation checkpoint."
-            ) from exc
+                f"{task_type} supports model_loader=auto_task_head only, not {ml!r}"
+            )
         config = AutoConfig.from_pretrained(
             cfg_id,
             num_labels=num_labels,
@@ -258,31 +254,8 @@ def load_hf_vision_model(
             id2label=id2label,
             **common,
         )
-        model = AutoModelForInstanceSegmentation.from_pretrained(
-            model_name_or_path,
-            config=config,
-            ignore_mismatched_sizes=ignore_mismatched_sizes,
-            **common,
-        )
-        return model, image_processor
-
-    if task_type == "universal_segment":
-        if ml != "auto_task_head":
-            raise ValueError(f"universal_segment supports model_loader=auto_task_head only, not {ml!r}")
-        try:
-            from transformers import AutoModelForUniversalSegmentation
-        except ImportError as exc:
-            raise ValueError(
-                "This Transformers version does not expose AutoModelForUniversalSegmentation; "
-                "upgrade transformers or use a supported universal segmentation checkpoint."
-            ) from exc
-        config = AutoConfig.from_pretrained(
-            cfg_id,
-            num_labels=num_labels,
-            label2id=label2id,
-            id2label=id2label,
-            **common,
-        )
+        # Mask2Former-style instance and panoptic checkpoints load via UniversalSegmentation
+        # (Transformers>=5.5); AutoModelForInstanceSegmentation is MaskFormer-only.
         model = AutoModelForUniversalSegmentation.from_pretrained(
             model_name_or_path,
             config=config,

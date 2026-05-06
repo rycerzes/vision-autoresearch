@@ -1,4 +1,4 @@
-"""Fine-tune SAM or SAM2 for segmentation using bbox or point prompts with the Trainer API.
+"""Prompt segmentation slice for the shared HF vision runner.
 
 This is stable infrastructure - do NOT edit during experiments.
 Experiments modify config YAMLs only.
@@ -15,6 +15,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -31,6 +32,7 @@ from transformers import (
 )
 
 from vision_lab.hf_vision.adaptation import apply_adaptation_mode
+from vision_lab.hf_vision.loaders import load_hf_vision_model
 from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
@@ -245,20 +247,26 @@ class ModelArguments:
 # Main
 
 def main():
+    if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
+        raise SystemExit("segment_train is an internal runner slice; use train_hf_vision.py <config.yaml|json>.")
+    run_from_config(Path(os.path.abspath(sys.argv[1])))
+
+
+def run_from_config(config_path: Path) -> None:
     start_time = time.time()
 
     parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
-    if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
+    if config_path.suffix.lower() in (".yaml", ".yml"):
         model_args, data_args, training_args = parser.parse_yaml_file(
-            yaml_file=os.path.abspath(sys.argv[1]), allow_extra_keys=True
+            yaml_file=str(config_path), allow_extra_keys=True
         )
-    elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+    elif config_path.suffix.lower() == ".json":
         model_args, data_args, training_args = parser.parse_json_file(
-            json_file=os.path.abspath(sys.argv[1])
+            json_file=str(config_path)
         )
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        raise SystemExit("Config must be .yaml, .yml, or .json")
 
     setup_hf_training_environment(training_args, logger=logger)
 
@@ -303,22 +311,22 @@ def main():
         dataset[eval_key] = dataset[eval_key].select(range(n))
         logger.info(f"Truncated eval set to {n} samples")
 
-    # Detect model family (SAM vs SAM2) and load processor/model
-    model_id = model_args.model_name_or_path.lower()
-    is_sam2 = "sam2" in model_id
-
-    if is_sam2:
-        from transformers import Sam2Model, Sam2Processor
-        processor = Sam2Processor.from_pretrained(model_args.model_name_or_path)
-        model = Sam2Model.from_pretrained(model_args.model_name_or_path)
-    else:
-        from transformers import SamModel, SamProcessor
-        processor = SamProcessor.from_pretrained(model_args.model_name_or_path)
-        model = SamModel.from_pretrained(model_args.model_name_or_path)
-
     ml = model_args.model_loader.strip()
-    if ml != "auto_task_head":
-        raise ValueError(f"segment supports model_loader=auto_task_head only, not {ml!r}")
+    model, processor = load_hf_vision_model(
+        task_type="segment",
+        model_loader=ml,
+        model_name_or_path=model_args.model_name_or_path,
+        config_name=None,
+        num_labels=1,
+        label2id={"mask": 0},
+        id2label={0: "mask"},
+        cache_dir=model_args.cache_dir,
+        model_revision=model_args.model_revision,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
+        ignore_mismatched_sizes=False,
+        image_processor_name=None,
+    )
     apply_adaptation_mode(model, model_args.adaptation_mode, architecture="segment")
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)

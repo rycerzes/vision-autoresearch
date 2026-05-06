@@ -3,11 +3,9 @@
 Stable infrastructure — experiments modify config YAMLs only.
 
 Configs use ``model_loader`` (``auto_task_head`` | ``auto_model`` | ``auto_backbone``) and
-``adaptation_mode`` (full fine-tune, frozen backbone / linear probe, eval-only, …). Task
-``classify`` uses ``vision_lab.hf_vision.loaders.load_hf_vision_model``; ``detect`` and
-``segment`` delegate to ``vision_lab.hf_vision.detect_train`` / ``segment_train`` (shared Hub /
-Trackio / logging / summary plumbing in ``vision_lab.hf_vision.runner_session`` and
-``summary_block``).
+``adaptation_mode`` (full fine-tune, frozen backbone / linear probe, eval-only, …). Supported
+HF tasks are loaded through ``vision_lab.hf_vision.loaders.load_hf_vision_model`` so
+task-head Transformers models are the forward-only training path.
 """
 
 # pyright: reportPrivateImportUsage=false
@@ -38,6 +36,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from vision_lab.hf_vision import apply_adaptation_mode, build_transforms, load_hf_vision_model
+from vision_lab.hf_vision.detect_train import run_from_config as _run_detect_from_config
 from vision_lab.hf_vision.constants import (
     ADAPTATION_MODE_CHOICES,
     HF_VISION_SUPPORTED_TASKS,
@@ -45,6 +44,7 @@ from vision_lab.hf_vision.constants import (
     ROUTED_TASK_IDS,
 )
 from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.segment_train import run_from_config as _run_segment_from_config
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
@@ -59,35 +59,13 @@ def _load_raw_config(config_path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _delegate_detect_train(config_path: Path) -> None:
-    saved = sys.argv[:]
-    try:
-        sys.argv = [saved[0] if saved else "train_hf_vision", str(config_path)]
-        from vision_lab.hf_vision.detect_train import main as detect_main
-
-        detect_main()
-    finally:
-        sys.argv = saved
-
-
-def _delegate_segment_train(config_path: Path) -> None:
-    saved = sys.argv[:]
-    try:
-        sys.argv = [saved[0] if saved else "train_hf_vision", str(config_path)]
-        from vision_lab.hf_vision.segment_train import main as segment_main
-
-        segment_main()
-    finally:
-        sys.argv = saved
-
-
 @dataclass
 class TaskArguments:
     """Which benchmark contract / summary this run uses."""
 
     task_type: str = field(
         default="classify",
-        metadata={"help": "Task id (must be classify when using the classification argument bundle)."},
+        metadata={"help": f"Task id (one of {sorted(ROUTED_TASK_IDS)})."},
     )
 
 
@@ -168,10 +146,10 @@ def main() -> None:
             f"Unsupported task_type={task!r} for train_hf_vision (expected one of {sorted(ROUTED_TASK_IDS)})."
         )
     if task == "detect":
-        _delegate_detect_train(cfg_path)
+        _run_detect_from_config(cfg_path)
         return
     if task == "segment":
-        _delegate_segment_train(cfg_path)
+        _run_segment_from_config(cfg_path)
         return
 
     start_time = time.time()
@@ -195,7 +173,9 @@ def main() -> None:
         raise SystemExit("Config must be .yaml, .yml, or .json")
 
     if str(task_args.task_type).strip() != "classify":
-        raise SystemExit(f"Expected task_type=classify in config, got {task_args.task_type!r}")
+        raise SystemExit(
+            f"Internal error: task_type={task_args.task_type!r} should have been routed before classification setup."
+        )
 
     adaptation_mode = adaptation_args.adaptation_mode.strip()
 

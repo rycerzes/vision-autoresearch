@@ -16,6 +16,7 @@ from transformers import (
     AutoImageProcessor,
     AutoModel,
     AutoModelForImageClassification,
+    AutoModelForObjectDetection,
 )
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -129,8 +130,9 @@ def load_hf_vision_model(
     """
     Return ``(model, image_processor)`` for ``task_type`` using the requested loader.
 
-    Only ``classify`` is implemented with ``load_hf_vision_model``; see
-    ``TASKS_USING_SHARED_MODEL_LOADER`` in ``constants``.
+    ``auto_task_head`` maps to the task-specific ``AutoModelFor*`` head. Probe-style
+    ``auto_model`` / ``auto_backbone`` loaders are classification-only until dense
+    task probe heads have a standard evaluator contract.
     """
     if task_type not in HF_VISION_SUPPORTED_TASKS:
         raise ValueError(
@@ -193,5 +195,38 @@ def load_hf_vision_model(
             model = BackboneClassifier(backbone, num_labels)
             logger.info("Loaded AutoBackbone + linear probe head (model_loader=auto_backbone).")
             return model, image_processor
+
+    if task_type == "detect":
+        if ml != "auto_task_head":
+            raise ValueError(f"detect supports model_loader=auto_task_head only, not {ml!r}")
+        config = AutoConfig.from_pretrained(
+            cfg_id,
+            label2id=label2id,
+            id2label=id2label,
+            **common,
+        )
+        model = AutoModelForObjectDetection.from_pretrained(
+            model_name_or_path,
+            config=config,
+            ignore_mismatched_sizes=ignore_mismatched_sizes,
+            **common,
+        )
+        return model, image_processor
+
+    if task_type == "segment":
+        if ml != "auto_task_head":
+            raise ValueError(f"segment supports model_loader=auto_task_head only, not {ml!r}")
+        model_id = model_name_or_path.lower()
+        if "sam2" in model_id:
+            from transformers import Sam2Model, Sam2Processor
+
+            processor = Sam2Processor.from_pretrained(proc_src, **common)
+            model = Sam2Model.from_pretrained(model_name_or_path, **common)
+        else:
+            from transformers import SamModel, SamProcessor
+
+            processor = SamProcessor.from_pretrained(proc_src, **common)
+            model = SamModel.from_pretrained(model_name_or_path, **common)
+        return model, processor
 
     raise RuntimeError(f"Unhandled combination task_type={task_type!r}, model_loader={ml!r}")

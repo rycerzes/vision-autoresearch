@@ -29,9 +29,9 @@ Primary workflow:
 
 Supported tasks:
 
-- `detect` — object detection via `train_hf_vision.py` → `vision_lab.hf_vision.detect_train` (DETR / D-FINE / RT-DETR / YOLOS)
+- `detect` — object detection via `train_hf_vision.py` and `AutoModelForObjectDetection` (DETR / D-FINE / RT-DETR / YOLOS)
 - `classify` — image classification via `train_hf_vision.py` (`model_loader`, `adaptation_mode`; `configs/base_classify.yaml`)
-- `segment` — SAM / SAM2 via `train_hf_vision.py` → `vision_lab.hf_vision.segment_train`
+- `segment` — prompt segmentation via `train_hf_vision.py` and SAM / SAM2 task heads
 - `detect_yolo` — Ultralytics YOLO detection via `train_ultralytics.py` (YOLO-World / RT-DETR via `YOLO()`, YOLOE via bridge; YOLO-NAS is not trainable in Ultralytics)
 - `track_yolo` — Ultralytics detector training via `train_ultralytics.py` (tracking uses inference-time trackers)
 - `segment_yolo` — Ultralytics YOLO segmentation via `train_ultralytics.py` (HF mask column → YOLO labels)

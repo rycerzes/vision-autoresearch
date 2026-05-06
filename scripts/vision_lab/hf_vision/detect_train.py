@@ -1,4 +1,4 @@
-"""Fine-tune any HF Transformers model for object detection using the Trainer API.
+"""Object-detection slice for the shared HF vision runner.
 
 This is stable infrastructure - do NOT edit during experiments.
 Experiments modify config YAMLs only.
@@ -17,6 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 import albumentations as A
@@ -26,9 +27,7 @@ import transformers
 from datasets import load_dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from transformers import (
-    AutoConfig,
     AutoImageProcessor,
-    AutoModelForObjectDetection,
     HfArgumentParser,
     Trainer,
     TrainingArguments,
@@ -38,6 +37,7 @@ from transformers.image_transforms import center_to_corners_format
 from transformers.trainer_utils import EvalPrediction
 
 from vision_lab.hf_vision.adaptation import apply_adaptation_mode
+from vision_lab.hf_vision.loaders import load_hf_vision_model
 from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
@@ -351,19 +351,24 @@ class ModelArguments:
 # Main
 
 def main():
+    if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
+        raise SystemExit("detect_train is an internal runner slice; use train_hf_vision.py <config.yaml|json>.")
+    run_from_config(Path(os.path.abspath(sys.argv[1])))
+
+
+def run_from_config(config_path: Path) -> None:
     start_time = time.time()
 
     parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
-    # Support: train_hf_vision.py config.yaml | detect_train via argv[1]
-    if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
+    if config_path.suffix.lower() in (".yaml", ".yml"):
         model_args, data_args, training_args = parser.parse_yaml_file(
-            yaml_file=os.path.abspath(sys.argv[1]), allow_extra_keys=True
+            yaml_file=str(config_path), allow_extra_keys=True
         )
-    elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+    elif config_path.suffix.lower() == ".json":
+        model_args, data_args, training_args = parser.parse_json_file(json_file=str(config_path))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        raise SystemExit("Config must be .yaml, .yml, or .json")
 
     setup_hf_training_environment(training_args, logger=logger)
 
@@ -460,38 +465,33 @@ def main():
         max_eval = min(data_args.max_eval_samples, len(dataset["validation"]))
         dataset["validation"] = dataset["validation"].select(range(max_eval))
 
-    # Load model & processor
-    common_pretrained_args = {
-        "cache_dir": model_args.cache_dir,
-        "revision": model_args.model_revision,
-        "token": model_args.token,
-        "trust_remote_code": model_args.trust_remote_code,
-    }
-    config = AutoConfig.from_pretrained(
-        model_args.config_name or model_args.model_name_or_path,
+    ml = model_args.model_loader.strip()
+    model, image_processor = load_hf_vision_model(
+        task_type="detect",
+        model_loader=ml,
+        model_name_or_path=model_args.model_name_or_path,
+        config_name=model_args.config_name,
+        num_labels=len(categories),
         label2id=label2id,
         id2label=id2label,
-        **common_pretrained_args,
-    )
-    model = AutoModelForObjectDetection.from_pretrained(
-        model_args.model_name_or_path,
-        config=config,
+        cache_dir=model_args.cache_dir,
+        model_revision=model_args.model_revision,
+        token=model_args.token,
+        trust_remote_code=model_args.trust_remote_code,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
-        **common_pretrained_args,
+        image_processor_name=model_args.image_processor_name,
     )
-    image_processor = AutoImageProcessor.from_pretrained(
-        model_args.image_processor_name or model_args.model_name_or_path,
-        do_resize=True,
-        size={"max_height": data_args.image_square_size, "max_width": data_args.image_square_size},
-        do_pad=True,
-        pad_size={"height": data_args.image_square_size, "width": data_args.image_square_size},
-        use_fast=data_args.use_fast,
-        **common_pretrained_args,
-    )
-
-    ml = model_args.model_loader.strip()
-    if ml != "auto_task_head":
-        raise ValueError(f"detect supports model_loader=auto_task_head only, not {ml!r}")
+    if data_args.image_square_size is not None:
+        image_processor.size = {
+            "max_height": data_args.image_square_size,
+            "max_width": data_args.image_square_size,
+        }
+        image_processor.pad_size = {
+            "height": data_args.image_square_size,
+            "width": data_args.image_square_size,
+        }
+    if data_args.use_fast is not None and hasattr(image_processor, "use_fast"):
+        image_processor.use_fast = data_args.use_fast
     apply_adaptation_mode(model, model_args.adaptation_mode, architecture="detect")
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())

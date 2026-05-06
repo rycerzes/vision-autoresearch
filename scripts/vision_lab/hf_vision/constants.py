@@ -23,11 +23,11 @@ ADAPTATION_MODE_CHOICES: frozenset[str] = frozenset(
     }
 )
 
-# ``task_type`` values accepted by ``train_hf_vision.py`` (router delegates detect / segment).
+# ``task_type`` values accepted by ``train_hf_vision.py``.
 ROUTED_TASK_IDS: frozenset[str] = frozenset({"classify", "detect", "segment"})
 
-# Tasks built via ``vision_lab.hf_vision.loaders.load_hf_vision_model`` (classification loader matrix).
-TASKS_USING_SHARED_MODEL_LOADER: frozenset[str] = frozenset({"classify"})
+# Tasks built via ``vision_lab.hf_vision.loaders.load_hf_vision_model``.
+TASKS_USING_SHARED_MODEL_LOADER: frozenset[str] = ROUTED_TASK_IDS
 
-# Backward-compatible alias used by ``loaders.py`` and the classify branch of ``train_hf_vision.py``.
+# Alias used by ``loaders.py`` and ``train_hf_vision.py``.
 HF_VISION_SUPPORTED_TASKS = TASKS_USING_SHARED_MODEL_LOADER

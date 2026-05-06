@@ -129,7 +129,8 @@ def load_hf_vision_model(
     """
     Return ``(model, image_processor)`` for ``task_type`` using the requested loader.
 
-    Only ``classify`` is implemented in this module; other task ids are not supported here.
+    Only ``classify`` is implemented with ``load_hf_vision_model``; see
+    ``TASKS_USING_SHARED_MODEL_LOADER`` in ``constants``.
     """
     if task_type not in HF_VISION_SUPPORTED_TASKS:
         raise ValueError(

@@ -20,7 +20,6 @@ from typing import Any, cast
 import numpy as np
 import torch
 import torch.nn.functional as F
-import trackio
 import transformers
 from datasets import load_dataset
 from monai.losses.dice import DiceCELoss
@@ -32,6 +31,8 @@ from transformers import (
 )
 
 from vision_lab.hf_vision.adaptation import apply_adaptation_mode
+from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
 
@@ -241,20 +242,6 @@ class ModelArguments:
     )
 
 
-# Structured summary for parse_metric.py
-
-def emit_summary(metrics: dict, train_metrics: dict, training_seconds: float, peak_vram_mb: float):
-    print("\n--- VISION AUTORESEARCH SUMMARY ---")
-    print("task_type: segment")
-    print(f"mIoU: {metrics.get('eval_mIoU', metrics.get('mIoU', 0.0))}")
-    print(f"dice: {metrics.get('eval_dice', metrics.get('dice', 0.0))}")
-    print(f"training_seconds: {training_seconds:.1f}")
-    print(f"peak_vram_mb: {peak_vram_mb:.0f}")
-    print(f"train_loss: {train_metrics.get('train_loss', 0.0)}")
-    print(f"num_train_epochs: {train_metrics.get('epoch', 0)}")
-    print("--- END SUMMARY ---")
-
-
 # Main
 
 def main():
@@ -273,34 +260,13 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Hub authentication
-    from huggingface_hub import login
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("hfjob")
-    if hf_token:
-        login(token=hf_token)
-        training_args.hub_token = hf_token
-        logger.info("Logged in to Hugging Face Hub")
-    elif training_args.push_to_hub:
-        logger.warning("HF_TOKEN not found. Hub push will likely fail.")
+    setup_hf_training_environment(training_args, logger=logger)
 
-    # Trackio
-    trackio.init(project=training_args.output_dir, name=training_args.run_name)
-
-    # Logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
+    logger.info(
+        "HF vision runner (segment vertical): model_loader=%s adaptation_mode=%s",
+        model_args.model_loader.strip(),
+        model_args.adaptation_mode.strip(),
     )
-    if training_args.should_log:
-        transformers.utils.logging.set_verbosity_info()
-
-    log_level = training_args.get_process_log_level()
-    logger.setLevel(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
-    transformers.utils.logging.enable_explicit_format()
-
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Load dataset
@@ -416,10 +382,11 @@ def main():
     training_seconds = time.time() - start_time
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1e6 if torch.cuda.is_available() else 0.0
 
-    trackio.finish()
+    finish_trackio_session()
 
-    # Structured summary
-    emit_summary(eval_metrics, train_metrics, training_seconds, peak_vram_mb)
+    print_vision_autoresearch_summary(
+        "segment", eval_metrics, train_metrics, training_seconds, peak_vram_mb
+    )
 
     # Push to Hub
     kwargs = {

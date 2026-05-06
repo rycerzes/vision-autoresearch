@@ -3,9 +3,11 @@
 Stable infrastructure — experiments modify config YAMLs only.
 
 Configs use ``model_loader`` (``auto_task_head`` | ``auto_model`` | ``auto_backbone``) and
-``adaptation_mode`` (full fine-tune, frozen backbone / linear probe, eval-only, …). Tasks
-``classify``, ``detect``, and ``segment`` run through this entrypoint (``detect`` / ``segment``
-delegate to ``vision_lab.hf_vision.detect_train`` / ``segment_train``).
+``adaptation_mode`` (full fine-tune, frozen backbone / linear probe, eval-only, …). Task
+``classify`` uses ``vision_lab.hf_vision.loaders.load_hf_vision_model``; ``detect`` and
+``segment`` delegate to ``vision_lab.hf_vision.detect_train`` / ``segment_train`` (shared Hub /
+Trackio / logging / summary plumbing in ``vision_lab.hf_vision.runner_session`` and
+``summary_block``).
 """
 
 # pyright: reportPrivateImportUsage=false
@@ -24,7 +26,6 @@ from typing import Any, cast
 import evaluate
 import numpy as np
 import torch
-import trackio
 import transformers
 import yaml
 from datasets import load_dataset
@@ -43,6 +44,8 @@ from vision_lab.hf_vision.constants import (
     MODEL_LOADER_CHOICES,
     ROUTED_TASK_IDS,
 )
+from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
 
@@ -153,24 +156,6 @@ class AdaptationArguments:
     )
 
 
-def emit_summary(
-    task_type: str,
-    metrics: dict[str, Any],
-    train_metrics: dict[str, Any],
-    training_seconds: float,
-    peak_vram_mb: float,
-) -> None:
-    print("\n--- VISION AUTORESEARCH SUMMARY ---")
-    print(f"task_type: {task_type}")
-    acc = metrics.get("eval_accuracy", metrics.get("test_accuracy", 0.0))
-    print(f"accuracy: {acc}")
-    print(f"training_seconds: {training_seconds:.1f}")
-    print(f"peak_vram_mb: {peak_vram_mb:.0f}")
-    print(f"train_loss: {train_metrics.get('train_loss', 0.0)}")
-    print(f"num_train_epochs: {train_metrics.get('epoch', 0)}")
-    print("--- END SUMMARY ---")
-
-
 def main() -> None:
     if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
         raise SystemExit("Usage: train_hf_vision.py <config.yaml|config.json>")
@@ -229,31 +214,7 @@ def main() -> None:
             f"Internal error: classify must be in HF_VISION_SUPPORTED_TASKS ({sorted(HF_VISION_SUPPORTED_TASKS)})."
         )
 
-    from huggingface_hub import login
-
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("hfjob")
-    if hf_token:
-        login(token=hf_token)
-        training_args.hub_token = hf_token
-        logger.info("Logged in to Hugging Face Hub")
-    elif training_args.push_to_hub:
-        logger.warning("HF_TOKEN not found. Hub push will likely fail.")
-
-    trackio.init(project=training_args.output_dir, name=training_args.run_name)
-
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    if training_args.should_log:
-        transformers.utils.logging.set_verbosity_info()
-
-    log_level = training_args.get_process_log_level()
-    logger.setLevel(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
-    transformers.utils.logging.enable_explicit_format()
+    setup_hf_training_environment(training_args, logger=logger)
 
     logger.info(
         "HF vision runner: task=%s model_loader=%s adaptation_mode=%s",
@@ -434,8 +395,10 @@ def _run_classify(
     training_seconds = time.time() - start_time
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1e6 if torch.cuda.is_available() else 0.0
 
-    trackio.finish()
-    emit_summary(task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb)
+    finish_trackio_session()
+    print_vision_autoresearch_summary(
+        task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb
+    )
 
     kwargs = {
         "finetuned_from": model_args.model_name_or_path,

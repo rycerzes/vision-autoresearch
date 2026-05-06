@@ -738,7 +738,10 @@ class InstanceSegmentationEvaluator:
     def _targets(self, target_batch: Any) -> list[dict[str, torch.Tensor]]:
         batch_masks, batch_labels = target_batch[0], target_batch[1]
         return [
-            {"masks": masks.to(dtype=torch.bool), "labels": labels.to(dtype=torch.long)}
+            {
+                "masks": torch.as_tensor(masks).to(dtype=torch.bool),
+                "labels": torch.as_tensor(labels).to(dtype=torch.long),
+            }
             for masks, labels in zip(batch_masks, batch_labels)
         ]
 
@@ -748,8 +751,8 @@ class InstanceSegmentationEvaluator:
         target_sizes: list[tuple[int, int]],
     ) -> list[dict[str, torch.Tensor]]:
         model_output = DenseSegmentationModelOutput(
-            class_queries_logits=prediction_batch[0],
-            masks_queries_logits=prediction_batch[1],
+            class_queries_logits=torch.as_tensor(prediction_batch[0]),
+            masks_queries_logits=torch.as_tensor(prediction_batch[1]),
         )
         post_processed = self.image_processor.post_process_instance_segmentation(
             model_output,
@@ -839,13 +842,16 @@ class PanopticSegmentationEvaluator:
         prediction_batch = _nested_cpu(eval_pred.predictions)
         target_batch = _nested_cpu(eval_pred.label_ids)
         targets = [
-            {"masks": masks.to(dtype=torch.bool), "labels": labels.to(dtype=torch.long)}
+            {
+                "masks": torch.as_tensor(masks).to(dtype=torch.bool),
+                "labels": torch.as_tensor(labels).to(dtype=torch.long),
+            }
             for masks, labels in zip(target_batch[0], target_batch[1])
         ]
         target_sizes = [tuple(t["masks"].shape[-2:]) for t in targets]
         model_output = DenseSegmentationModelOutput(
-            class_queries_logits=prediction_batch[0],
-            masks_queries_logits=prediction_batch[1],
+            class_queries_logits=torch.as_tensor(prediction_batch[0]),
+            masks_queries_logits=torch.as_tensor(prediction_batch[1]),
         )
         if hasattr(self.image_processor, "post_process_panoptic_segmentation"):
             post_processed = self.image_processor.post_process_panoptic_segmentation(

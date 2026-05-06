@@ -8,9 +8,11 @@ Agents propose a hypothesis, change one config knob, run a finetune, and auto-pr
 
 | Task | Script | Default Model | Dataset | Headline metric |
 |------|--------|---------------|---------|-----------------|
-| Classify | `train_classify.py` | `google/vit-base-patch16-224` | food101 | `accuracy` |
-| Detect | `train_detect.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
-| Segment | `train_segment.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
+| Classify | `train_hf_vision.py` | `google/vit-base-patch16-224` | food101 | `accuracy` |
+| Detect | `train_hf_vision.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
+| Segment | `train_hf_vision.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
+
+Classification configs set `model_loader` and `adaptation_mode` (see `configs/base_classify.yaml`).
 
 Ultralytics (`train_ultralytics.py`): `detect_yolo` / `track_yolo` / `pose_yolo` / `obb_yolo` default to `mAP` (with `mAP_50` allowed in `promotion:`); `segment_yolo` uses `mask_map`; `classify_yolo` uses `accuracy`.
 
@@ -76,7 +78,8 @@ Each worker runs in an isolated git worktree under `.runtime/worktrees/`.
 learning_rate, weight_decay, warmup_steps, lr_scheduler_type
 per_device_train_batch_size, gradient_accumulation_steps
 num_train_epochs, fp16
-freeze_backbone, image_square_size (detect)
+model_loader, adaptation_mode (train_hf_vision tasks)
+image_square_size (detect)
 use_albumentations (detect), prompt_type (segment)
 ```
 
@@ -88,9 +91,7 @@ use_albumentations (detect), prompt_type (segment)
 │   ├── base_classify.yaml
 │   ├── base_detect.yaml
 │   └── base_segment.yaml
-├── train_classify.py          # stable — do not edit
-├── train_detect.py            # stable — do not edit
-├── train_segment.py           # stable — do not edit
+├── train_hf_vision.py         # stable — classify, detect, segment (do not edit)
 ├── prepare.py                 # dataset validation CLI (vision_lab.dataset_validation)
 ├── scripts/
 │   ├── refresh_master.py      # restore config from promoted master

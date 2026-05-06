@@ -4,6 +4,9 @@
 task_type: detect
 backend: transformers
 
+model_loader: auto_task_head
+adaptation_mode: full_finetune
+
 # Model
 model_name_or_path: ustc-community/dfine-small-coco
 
@@ -29,9 +32,6 @@ do_eval: true
 # Augmentation
 image_square_size: 640
 use_albumentations: true
-
-# Backbone
-freeze_backbone: false
 
 # Evaluation
 eval_strategy: epoch

@@ -4,8 +4,12 @@
 task_type: classify
 backend: transformers
 
-# Model (supports transformers or timm models)
+# Model loading (shared HF vision runner)
+model_loader: auto_task_head
 model_name_or_path: google/vit-base-patch16-224
+
+# Adaptation: full_finetune | freeze_backbone | linear_probe | feature_extract_eval | zero_shot_eval | prompt_or_class_adapter
+adaptation_mode: full_finetune
 
 # Dataset (must be on HF Hub)
 dataset_name: food101
@@ -27,9 +31,6 @@ remove_unused_columns: false
 
 # Augmentation
 use_trivial_augment: true
-
-# Backbone
-freeze_backbone: false
 
 # Evaluation
 eval_strategy: epoch

@@ -40,14 +40,14 @@ Supported tasks:
 
 | Task | Training Script | Default Config | Promotion Metric |
 |------|----------------|----------------|-----------------|
-| detect | train_detect.py | configs/base_detect.yaml | mAP |
+| detect | train_hf_vision.py | configs/base_detect.yaml | mAP |
 | detect_yolo | train_ultralytics.py | configs/base_detect_yolo.yaml | mAP |
 | track_yolo | train_ultralytics.py | configs/base_track_yolo.yaml | mAP |
 | segment_yolo | train_ultralytics.py | configs/base_segment_yolo.yaml | mask_map |
 | classify_yolo | train_ultralytics.py | configs/base_classify_yolo.yaml | accuracy |
 | pose_yolo | train_ultralytics.py | configs/base_pose_yolo.yaml | mAP |
 | obb_yolo | train_ultralytics.py | configs/base_obb_yolo.yaml | mAP |
-| classify | train_classify.py | configs/base_classify.yaml | accuracy |
-| segment | train_segment.py | configs/base_segment.yaml | mIoU |
+| classify | train_hf_vision.py | configs/base_classify.yaml | accuracy |
+| segment | train_hf_vision.py | configs/base_segment.yaml | mIoU |
 
 Do not run paid experiment work directly from the main checkout when the worker launcher can provide an isolated worktree.

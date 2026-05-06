@@ -38,6 +38,8 @@ from transformers.image_processing_base import BatchFeature
 from transformers.image_transforms import center_to_corners_format
 from transformers.trainer_utils import EvalPrediction
 
+from vision_lab.hf_vision.adaptation import apply_adaptation_mode
+
 logger = logging.getLogger(__name__)
 
 
@@ -299,10 +301,6 @@ class DataTrainingArguments:
         default=True,
         metadata={"help": "Use fast torchvision-based image processor."},
     )
-    freeze_backbone: bool = field(
-        default=False,
-        metadata={"help": "Freeze backbone weights (linear probe mode)."},
-    )
 
 
 @dataclass
@@ -339,6 +337,14 @@ class ModelArguments:
         default=False,
         metadata={"help": "Trust remote code from Hub repos."},
     )
+    model_loader: str = field(
+        default="auto_task_head",
+        metadata={"help": "Weight graph: auto_task_head (AutoModelForObjectDetection) only for detect."},
+    )
+    adaptation_mode: str = field(
+        default="full_finetune",
+        metadata={"help": "Training posture (see vision_lab.hf_vision.constants.ADAPTATION_MODE_CHOICES)."},
+    )
 
 
 # Structured summary for parse_metric.py
@@ -363,7 +369,7 @@ def main():
 
     parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
 
-    # Support: train_detect.py config.yaml | train_detect.py --arg1 val1 ...
+    # Support: train_hf_vision.py config.yaml | detect_train via argv[1]
     if len(sys.argv) == 2 and sys.argv[1].endswith((".yaml", ".yml")):
         model_args, data_args, training_args = parser.parse_yaml_file(
             yaml_file=os.path.abspath(sys.argv[1]), allow_extra_keys=True
@@ -518,18 +524,13 @@ def main():
         **common_pretrained_args,
     )
 
-    # Freeze backbone
-    if data_args.freeze_backbone:
-        frozen_count = 0
-        for name, param in model.named_parameters():
-            # Keep detection head trainable (class_embed, bbox_embed, decoder typically)
-            is_head = any(k in name for k in ("class_embed", "bbox_embed", "input_proj", "decoder"))
-            if not is_head:
-                param.requires_grad_(False)
-                frozen_count += 1
-        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        total = sum(p.numel() for p in model.parameters())
-        logger.info(f"Backbone frozen: {frozen_count} params frozen, {trainable:,}/{total:,} trainable ({100*trainable/total:.1f}%)")
+    ml = model_args.model_loader.strip()
+    if ml != "auto_task_head":
+        raise ValueError(f"detect supports model_loader=auto_task_head only, not {ml!r}")
+    apply_adaptation_mode(model, model_args.adaptation_mode, architecture="detect")
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    logger.info("After adaptation_mode=%s: %s/%s params trainable", model_args.adaptation_mode, trainable, total)
 
     # Augmentation
     max_size = data_args.image_square_size
@@ -636,5 +637,3 @@ def main():
         trainer.create_model_card(**kwargs)
 
 
-if __name__ == "__main__":
-    main()

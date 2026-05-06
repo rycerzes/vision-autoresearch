@@ -11,8 +11,8 @@ on a given dataset with disciplined, comparable single-change experiments.
 
 ## Hard Rules
 
-- During **benchmark experiments**, edit **config YAMLs only** — never training scripts (`train_detect.py`,
-  `train_ultralytics.py`, `train_classify.py`, `train_segment.py`). Do not fold orchestration or `prepare.py`
+- During **benchmark experiments**, edit **config YAMLs only** — never training scripts (`train_ultralytics.py`,
+  `train_hf_vision.py`). Do not fold orchestration or `prepare.py`
   changes into an experiment PR unless you are explicitly doing infrastructure work.
 - Start from the current local promoted master config, not stale local history.
 - Treat `research/live/master.json`, `research/results.tsv`, and the base
@@ -32,15 +32,15 @@ on a given dataset with disciplined, comparable single-change experiments.
 
 | Task | Training Script | Default Model | Promotion Metric |
 |------|----------------|---------------|-----------------|
-| `detect` | `train_detect.py` | `ustc-community/dfine-small-coco` | mAP |
+| `detect` | `train_hf_vision.py` | `ustc-community/dfine-small-coco` | mAP |
 | `detect_yolo` | `train_ultralytics.py` | `yolo26n.pt` (Ultralytics) | mAP |
 | `track_yolo` | `train_ultralytics.py` | `yolo26n.pt` | mAP (detector training for tracking) |
 | `segment_yolo` | `train_ultralytics.py` | `yolo26n-seg.pt` | mask mAP (`mask_map`) |
 | `classify_yolo` | `train_ultralytics.py` | `yolo26n-cls.pt` | accuracy |
 | `pose_yolo` | `train_ultralytics.py` | `yolo26n-pose.pt` | mAP |
 | `obb_yolo` | `train_ultralytics.py` | `yolo26n-obb.pt` | mAP |
-| `classify` | `train_classify.py` | `google/vit-base-patch16-224` | accuracy |
-| `segment` | `train_segment.py` | `facebook/sam2.1-hiera-small` | mIoU |
+| `classify` | `train_hf_vision.py` | `google/vit-base-patch16-224` | accuracy |
+| `segment` | `train_hf_vision.py` | `facebook/sam2.1-hiera-small` | mIoU |
 
 ## Config YAML as Experiment Surface
 
@@ -52,7 +52,7 @@ such as:
 - `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`
 - `per_device_train_batch_size`, `gradient_accumulation_steps`
 - `image_size`, `use_albumentations`, `use_trivial_augment`
-- `freeze_backbone`, `prompt_type`, `loss_type`
+- `model_loader`, `adaptation_mode` (``train_hf_vision.py`` tasks), `prompt_type`, `loss_type`
 - `num_train_epochs`
 - Optional **`promotion`**: YAML mapping with `primary`, `direction` (`higher` or
   `lower`), `min_delta`, optional `secondary`, optional `gates` (list of
@@ -143,8 +143,8 @@ For local GPU execution:
 ## Repo Layout
 
 - `configs/` — base and experiment config YAMLs (the experiment surface).
-- `train_detect.py`, `train_ultralytics.py`,
-  `train_classify.py`, `train_segment.py` — stable training scripts (do not edit during experiments).
+- `train_ultralytics.py`,
+  `train_hf_vision.py` — stable training scripts (do not edit during experiments).
 - `prepare.py` — dataset validation CLI (`vision_lab.dataset_validation`); lives at repo root.
 - `research/results.tsv` — append-only local run ledger.
 - `research/runs/` — per-run `metrics.json` artifacts (written by `submit_patch.py`).

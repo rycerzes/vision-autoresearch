@@ -21,7 +21,7 @@ Primary workflow:
 2. `uv run scripts/refresh_master.py`
 3. edit config YAML (one knob change)
 4. `uv run prepare.py --dataset <name_or_path> --task <task> --split train` (optional `--adapter`, `--run-output-dir`; manifests default to `.runtime/datasets/` or `<run>/dataset/`)
-5. `uv run scripts/hf_job.py preflight --task <task>` (checks task ↔ `task_type`, promotion block, model backend, optional `dataset_adapter` / local `dataset_root`)
+5. `uv run scripts/hf_job.py preflight --task <task>` (checks task ↔ `task_type`, promotion block, model backend, optional `dataset_adapter` / local `dataset_root`, and for `train_hf_vision.py` tasks: `model_loader` / `adaptation_mode`)
 6. `uv run scripts/hf_job.py launch --task <task> --config <config-path>`
 7. `uv run scripts/hf_job.py logs <JOB_ID> --follow --output /tmp/vision-run.log`
 8. `uv run scripts/parse_metric.py /tmp/vision-run.log` (optional: `--task <task> [--config <yaml>]` to validate the summary against the task promotion contract)
@@ -29,9 +29,9 @@ Primary workflow:
 
 Supported tasks:
 
-- `detect` — object detection (DETR, D-FINE, RT-DETR, YOLOS)
-- `classify` — image classification (ViT, timm models)
-- `segment` — segmentation (SAM, SAM2)
+- `detect` — object detection via `train_hf_vision.py` → `vision_lab.hf_vision.detect_train` (DETR / D-FINE / RT-DETR / YOLOS)
+- `classify` — image classification via `train_hf_vision.py` (`model_loader`, `adaptation_mode`; `configs/base_classify.yaml`)
+- `segment` — SAM / SAM2 via `train_hf_vision.py` → `vision_lab.hf_vision.segment_train`
 - `detect_yolo` — Ultralytics YOLO detection via `train_ultralytics.py` (YOLO-World / RT-DETR via `YOLO()`, YOLOE via bridge; YOLO-NAS is not trainable in Ultralytics)
 - `track_yolo` — Ultralytics detector training via `train_ultralytics.py` (tracking uses inference-time trackers)
 - `segment_yolo` — Ultralytics YOLO segmentation via `train_ultralytics.py` (HF mask column → YOLO labels)

@@ -82,11 +82,15 @@ from ultralytics.models.rtdetr.model import RTDETR
 from ultralytics.models.yolo.model import YOLO, YOLOE, YOLOWorld
 from ultralytics.utils import DEFAULT_CFG
 
-from train_detect import ModelArguments, detect_bbox_format_from_samples, sanitize_dataset
-
 _SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from vision_lab.hf_vision.detect_train import (
+    ModelArguments,
+    detect_bbox_format_from_samples,
+    sanitize_dataset,
+)
 from vision_lab.metrics import METRICS
 
 logger = logging.getLogger(__name__)

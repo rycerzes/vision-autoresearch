@@ -4,6 +4,9 @@
 task_type: segment
 backend: transformers
 
+model_loader: auto_task_head
+adaptation_mode: linear_probe
+
 # Model
 model_name_or_path: facebook/sam2.1-hiera-small
 
@@ -36,9 +39,6 @@ prompt_type: bbox
 loss_type: dice_ce
 dice_weight: 1.0
 ce_weight: 1.0
-
-# Backbone
-freeze_backbone: true
 
 # Evaluation
 eval_strategy: epoch

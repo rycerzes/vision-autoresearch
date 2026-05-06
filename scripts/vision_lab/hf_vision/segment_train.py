@@ -31,6 +31,8 @@ from transformers import (
     TrainingArguments,
 )
 
+from vision_lab.hf_vision.adaptation import apply_adaptation_mode
+
 logger = logging.getLogger(__name__)
 
 
@@ -217,14 +219,6 @@ class DataTrainingArguments:
         default="bbox",
         metadata={"help": "Prompt type: 'bbox' or 'point'."},
     )
-    freeze_backbone: bool = field(
-        default=True,
-        metadata={"help": "Freeze vision encoder (default for SAM)."},
-    )
-    freeze_prompt_encoder: bool = field(
-        default=True,
-        metadata={"help": "Freeze prompt encoder."},
-    )
 
 
 @dataclass
@@ -237,6 +231,14 @@ class ModelArguments:
     model_revision: str = field(default="main", metadata={"help": "Model revision."})
     token: str | None = field(default=None, metadata={"help": "Auth token."})
     trust_remote_code: bool = field(default=False, metadata={"help": "Trust remote code."})
+    model_loader: str = field(
+        default="auto_task_head",
+        metadata={"help": "Weight graph: auto_task_head (SAM/SAM2 from Hub) only for segment."},
+    )
+    adaptation_mode: str = field(
+        default="linear_probe",
+        metadata={"help": "Training posture (see vision_lab.hf_vision.constants.ADAPTATION_MODE_CHOICES)."},
+    )
 
 
 # Structured summary for parse_metric.py
@@ -348,15 +350,10 @@ def main():
         processor = SamProcessor.from_pretrained(model_args.model_name_or_path)
         model = SamModel.from_pretrained(model_args.model_name_or_path)
 
-    # Freeze backbone
-    if data_args.freeze_backbone:
-        for name, param in model.named_parameters():
-            if name.startswith("vision_encoder"):
-                param.requires_grad_(False)
-    if data_args.freeze_prompt_encoder:
-        for name, param in model.named_parameters():
-            if name.startswith("prompt_encoder"):
-                param.requires_grad_(False)
+    ml = model_args.model_loader.strip()
+    if ml != "auto_task_head":
+        raise ValueError(f"segment supports model_loader=auto_task_head only, not {ml!r}")
+    apply_adaptation_mode(model, model_args.adaptation_mode, architecture="segment")
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -436,5 +433,3 @@ def main():
         trainer.create_model_card(**kwargs)
 
 
-if __name__ == "__main__":
-    main()

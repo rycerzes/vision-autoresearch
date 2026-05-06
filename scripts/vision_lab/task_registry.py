@@ -23,7 +23,7 @@ class TaskSpec:
     backend: str
     """High-level trainer family: ``transformers`` or ``ultralytics``."""
     train_script: str
-    """Python entry script filename at repo root (e.g. ``train_detect.py``)."""
+    """Python entry script filename at repo root (e.g. ``train_hf_vision.py``)."""
     dataset_schema_kind: str
     """HF dataset column contract (see ``vision_lab.dataset_validation``)."""
     primary_metric: str
@@ -88,7 +88,7 @@ _TASKS: tuple[TaskSpec, ...] = (
     _task(
         id="detect",
         backend="transformers",
-        train_script="train_detect.py",
+        train_script="train_hf_vision.py",
         dataset_schema_kind="detection",
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
@@ -97,7 +97,7 @@ _TASKS: tuple[TaskSpec, ...] = (
     _task(
         id="classify",
         backend="transformers",
-        train_script="train_classify.py",
+        train_script="train_hf_vision.py",
         dataset_schema_kind="classification",
         primary_metric="accuracy",
         metric_direction=MetricDirection.HIGHER,
@@ -106,7 +106,7 @@ _TASKS: tuple[TaskSpec, ...] = (
     _task(
         id="segment",
         backend="transformers",
-        train_script="train_segment.py",
+        train_script="train_hf_vision.py",
         dataset_schema_kind="semantic_segmentation",
         primary_metric="mIoU",
         metric_direction=MetricDirection.HIGHER,

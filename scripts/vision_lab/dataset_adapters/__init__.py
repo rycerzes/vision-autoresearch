@@ -1,4 +1,4 @@
-"""Filesystem and Hub dataset layout validators (Phase 3 adapters)."""
+"""Filesystem and Hub dataset layout validators."""
 
 from __future__ import annotations
 

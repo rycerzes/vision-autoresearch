@@ -27,17 +27,17 @@ Supported tasks:
 
 | Task | Training Script | Default Config | Promotion Metric |
 |------|----------------|----------------|-----------------|
-| detect | train_detect.py | configs/base_detect.yaml | mAP |
+| detect | train_hf_vision.py | configs/base_detect.yaml | mAP |
 | detect_yolo | train_ultralytics.py | configs/base_detect_yolo.yaml | mAP |
 | track_yolo | train_ultralytics.py | configs/base_track_yolo.yaml | mAP |
 | segment_yolo | train_ultralytics.py | configs/base_segment_yolo.yaml | mask_map |
 | classify_yolo | train_ultralytics.py | configs/base_classify_yolo.yaml | accuracy |
 | pose_yolo | train_ultralytics.py | configs/base_pose_yolo.yaml | mAP |
 | obb_yolo | train_ultralytics.py | configs/base_obb_yolo.yaml | mAP |
-| classify | train_classify.py | configs/base_classify.yaml | accuracy |
-| segment | train_segment.py | configs/base_segment.yaml | mIoU |
+| classify | train_hf_vision.py | configs/base_classify.yaml | accuracy |
+| segment | train_hf_vision.py | configs/base_segment.yaml | mIoU |
 
-Tunable config knobs include: `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `image_size`, `use_albumentations`, `use_trivial_augment`, `freeze_backbone`, `prompt_type`, `loss_type`, `num_train_epochs`.
+Tunable config knobs include: `learning_rate`, `weight_decay`, `warmup_steps`, `lr_scheduler_type`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `image_size`, `use_albumentations`, `use_trivial_augment`, `model_loader`, `adaptation_mode`, `prompt_type`, `loss_type`, `num_train_epochs`.
 
 Rules:
 

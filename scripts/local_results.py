@@ -148,6 +148,21 @@ def write_run_metrics_artifact(run_id: str, payload: dict[str, Any]) -> Path:
     return out_path
 
 
+def write_run_contract_artifact(run_id: str, contract_path: Path) -> Path:
+    """Persist the resolved ``RunContract`` as JSON under ``research/runs/<run_id>/contract.json``."""
+    from vision_lab.contracts.loader import load_run_contract
+    from vision_lab.contracts.run_contract import run_contract_to_primitive_dict
+
+    resolved = Path(contract_path).expanduser().resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"contract file not found: {resolved}")
+    contract = load_run_contract(resolved)
+    out_path = RUNS_DIR / run_id / "contract.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(out_path, run_contract_to_primitive_dict(contract))
+    return out_path
+
+
 def write_results_rows(rows: list[dict[str, object]]) -> None:
     RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with RESULTS_PATH.open("w", encoding="utf-8", newline="") as handle:

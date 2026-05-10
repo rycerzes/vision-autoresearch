@@ -28,6 +28,7 @@ from local_results import (
     stringify_field,
     truthy,
     write_json,
+    write_run_contract_artifact,
     write_run_metrics_artifact,
 )
 from parse_metric import parse_summary
@@ -116,6 +117,12 @@ def main() -> int:
         "--metrics-json", type=Path, help="Load metrics from a JSON file"
     )
     parser.add_argument("--config", type=Path, help="Config YAML used for this run")
+    parser.add_argument(
+        "--contract",
+        type=Path,
+        default=None,
+        help="Resolved RunContract YAML/JSON written alongside metrics as contract.json",
+    )
     parser.add_argument(
         "--task", choices=_SUBMIT_TASK_CHOICES, help="Task type"
     )
@@ -270,6 +277,8 @@ def main() -> int:
         "promotion_evaluation": evaluation_to_jsonable(promotion_eval),
     }
     write_run_metrics_artifact(appended["run_id"], metrics_payload)
+    if args.contract is not None:
+        write_run_contract_artifact(appended["run_id"], args.contract)
 
     if truthy(appended["promoted"]):
         updated_rows = [*existing_rows, appended]

@@ -156,9 +156,40 @@ def _resolve_detect_objects_column_v1(task_id: str, profile: HubDatasetProfile) 
     )
 
 
+def _resolve_yolo_hub_detect_labels_role_v1(task_id: str, profile: HubDatasetProfile) -> ContractDataset:
+    """Map Hub detection columns to contract roles expected by ``ultralytics.yolo.train_v1``."""
+    spec = get_task(task_id)
+    if spec.backend != "ultralytics" or spec.dataset_schema_kind != "detection":
+        raise ProfileResolutionError(
+            f"task {task_id!r} is not an Ultralytics detection task for this resolver"
+        )
+    _require_pinned_revision(profile)
+    cols = _schema_columns(profile)
+    if "image" not in cols:
+        raise ProfileResolutionError(f"expected an 'image' column; have {sorted(cols)}")
+    if "objects" not in cols:
+        raise ProfileResolutionError(
+            f"expected an 'objects' column for Hub detection; have {sorted(cols)}"
+        )
+    rid = "hf_hub.yolo.detect_labels_role_v1"
+    mapping = (("image", "image"), ("labels", "objects"))
+    return ContractDataset(
+        source="hf_hub",
+        identifier=profile.repo_id,
+        revision=profile.revision_resolved,
+        config_name=profile.config_name,
+        split=profile.split,
+        profile_id=rid,
+        column_mapping=tuple(sorted(mapping, key=lambda x: x[0])),
+    )
+
+
 def _register_builtin_resolvers() -> None:
     register_profile_resolver("hf_hub.classify.image_label_v1", _resolve_classify_image_label_v1)
     register_profile_resolver("hf_hub.detect.objects_column_v1", _resolve_detect_objects_column_v1)
+    register_profile_resolver(
+        "hf_hub.yolo.detect_labels_role_v1", _resolve_yolo_hub_detect_labels_role_v1
+    )
 
 
 _register_builtin_resolvers()

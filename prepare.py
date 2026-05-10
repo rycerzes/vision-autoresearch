@@ -12,6 +12,7 @@ Usage:
     python prepare.py --dataset ./voc_dataset --task detect --adapter voc_xml
     python prepare.py --dataset cppe-5 --task detect --split train --inspect
     python prepare.py --dataset cppe-5 --task detect --split train --json
+    python prepare.py --emit-contract /path/to/contract.yaml --experiment-config configs/base_classify.yaml
 """
 from __future__ import annotations
 
@@ -20,10 +21,13 @@ import json as json_mod
 import sys
 from pathlib import Path
 
+import yaml
+
 _SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from vision_lab.compile_launch_contract import compile_config_file_to_path
 from vision_lab.dataset_validation import (
     NUM_INSPECT_SAMPLES_DEFAULT,
     all_adapter_ids_cli,
@@ -34,13 +38,54 @@ from vision_lab.task_registry import all_task_ids
 NUM_INSPECT_SAMPLES = NUM_INSPECT_SAMPLES_DEFAULT
 
 
-def main():
+def _emit_contract_main(args: argparse.Namespace) -> None:
+    cfg = args.experiment_config.expanduser().resolve()
+    if not cfg.is_file():
+        raise SystemExit(f"Experiment config not found: {cfg}")
+    out = args.emit_contract.expanduser().resolve()
+    raw = cfg.read_text(encoding="utf-8")
+    if cfg.suffix.lower() in (".yaml", ".yml"):
+        data = yaml.safe_load(raw)
+    elif cfg.suffix.lower() == ".json":
+        data = json_mod.loads(raw)
+    else:
+        raise SystemExit("--experiment-config must be .yaml, .yml, or .json")
+    if not isinstance(data, dict):
+        raise SystemExit("Experiment config root must be a mapping")
+    task = args.task or str(data.get("task_type", "")).strip()
+    if not task:
+        raise SystemExit("task is required (--task) or set task_type in the experiment config")
+    if task not in all_task_ids():
+        raise SystemExit(f"Unknown task {task!r}")
+    compile_config_file_to_path(task_id=task, config_path=cfg, output_path=out)
+    if args.json_output:
+        print(json_mod.dumps({"contract_path": str(out), "task": task}, indent=2))
+    else:
+        print(f"Wrote resolved RunContract to {out}")
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Validate a HF or local dataset for vision training")
-    parser.add_argument("--dataset", required=True, help="HF Hub dataset id or local path")
+    parser.add_argument(
+        "--emit-contract",
+        type=Path,
+        metavar="OUTPUT",
+        default=None,
+        help="Compile --experiment-config to a validated RunContract YAML at OUTPUT (Phase 5)",
+    )
+    parser.add_argument(
+        "--experiment-config",
+        type=Path,
+        default=None,
+        help="Experiment YAML/JSON path (required with --emit-contract)",
+    )
+    parser.add_argument("--dataset", default=None, help="HF Hub dataset id or local path")
     parser.add_argument(
         "--task",
-        required=True,
+        required=False,
+        default=None,
         choices=list(all_task_ids()),
+        help="Task type (for dataset validation, or optional override with --emit-contract)",
     )
     parser.add_argument("--split", default="train")
     parser.add_argument("--config", default=None, help="HF dataset config name (Hub only)")
@@ -70,6 +115,17 @@ def main():
         help="Write cache manifest under <dir>/dataset (also via env VISION_RUN_OUTPUT_DIR)",
     )
     args = parser.parse_args()
+
+    if args.emit_contract is not None:
+        if args.experiment_config is None:
+            raise SystemExit("--emit-contract requires --experiment-config")
+        _emit_contract_main(args)
+        return
+
+    if not args.dataset:
+        raise SystemExit("--dataset is required unless using --emit-contract")
+    if not args.task:
+        raise SystemExit("--task is required for dataset validation")
 
     print(f"Validating {args.dataset} for task={args.task}, split={args.split}...")
     result = validate_dataset(
@@ -112,7 +168,7 @@ def main():
     if result.get("cache_manifest_path"):
         print(f"  Cache manifest: {result['cache_manifest_path']}")
 
-    if result["inspection"]:
+    if result.get("inspection"):
         print("  Inspection details:")
         for key, val in result["inspection"].items():
             if val is not None and val != [] and val != {}:

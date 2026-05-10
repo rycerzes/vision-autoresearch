@@ -140,6 +140,8 @@ def main() -> int:
             str(log_path),
             "--config",
             str(config_path),
+            "--contract",
+            str(contract_path),
             "--task",
             task,
             "--comment",

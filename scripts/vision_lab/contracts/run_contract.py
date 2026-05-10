@@ -1,8 +1,7 @@
 """Canonical run contract datamodel.
 
 Defines structure, validation, serialization, and fingerprinting.
-Resolvers in later phases populate these fields; training consumes only validated
-``RunContract`` instances.
+Resolvers populate these fields; training consumes only validated ``RunContract`` instances.
 """
 
 from __future__ import annotations

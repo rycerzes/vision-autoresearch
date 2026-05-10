@@ -7,6 +7,7 @@ Core rules:
 
 - use `uv`
 - for benchmark experiments, edit config YAMLs only — do not change training scripts (`train_*.py`) or lab orchestration as part of a hypothesis
+- **Contract compile:** flat experiment YAMLs are compiled to a **RunContract** before training (`run_local`, `hf_job`, `prepare.py --emit-contract`). Compilation uses Hub inspection + resolvers for supported tasks; other tasks or offline use cases require a **hand-authored RunContract** YAML (`contract_version: 1`). There is no implicit `legacy.*` pipeline or guessed column mapping (Phase 6).
 - refresh from the current local promoted master before a fresh experiment:
   `uv run scripts/refresh_master.py`
 - treat `research/live/master.json` and `research/results.tsv` as the
@@ -15,6 +16,8 @@ Core rules:
 - record every completed run with
   `uv run scripts/submit_patch.py --comment "..."`
 - promotion is local: `scripts/submit_patch.py` updates the live master only when the configured **`promotion:`** policy beats the current master (direction follows `scripts/vision_lab/metrics.py`).
+- Example RunContract YAMLs (contract-first / offline compile): `configs/examples/README.md`
+
 Primary workflow:
 
 1. `uv sync`
@@ -44,4 +47,4 @@ Supported tasks:
 
 Local execution:
 
-- `uv run scripts/run_local.py --task <task> --config <config-path>` (runs the same preflight as HF Jobs unless `--skip-preflight`)
+- `uv run scripts/run_local.py --task <task> --config <config-path>` (runs the same preflight as HF Jobs unless `--skip-preflight`; writes `.runtime/hf-job-last.json` with `contract_path` after compile for `submit_patch`)

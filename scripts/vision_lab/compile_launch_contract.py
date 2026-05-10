@@ -1,12 +1,12 @@
 """Compile an experiment YAML/JSON config into a validated ``RunContract`` file.
 
-Training entrypoints (``train_hf_vision.py``, ``train_ultralytics.py``) accept only a
-contract path. Launchers (``hf_job.py``, ``run_local.py``) call this module first when
-the user passes a legacy flat config.
+Training entrypoints accept only a resolved contract path. Launchers call this module when
+the config is still a **flat** experiment YAML: we run Hub **inspect → profile resolve →
+pipeline resolve** for tasks that have resolver wiring.
 
-When the config targets a Hub dataset, this module runs **inspect → profile resolve →
-pipeline resolve** (Phases 2–3) for supported task families; otherwise it falls back to
-the legacy flat mapping (stub ``legacy.*`` pipeline ids).
+If resolution cannot run (unsupported task, local dataset path, or Hub/resolver failure),
+compilation **aborts** with remediation hints — there is no implicit ``legacy.*`` pipeline
+or guessed column mapping (Phase 6).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 
@@ -77,17 +77,6 @@ def _promotion_dict(raw: dict[str, Any], *, task_id: str) -> dict[str, Any]:
     }
 
 
-def _pipeline_dict_legacy(*, task_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "transform_recipe_id": f"legacy.{task_id}",
-        "transform_recipe_params": {},
-        "collator_id": f"legacy.{task_id}",
-        "loss_id": f"legacy.{task_id}",
-        "metric_set_id": f"legacy.{task_id}",
-        "promotion": _promotion_dict(raw, task_id=task_id),
-    }
-
-
 def _runtime_dict(raw: dict[str, Any]) -> dict[str, Any]:
     seed = int(raw.get("seed", 42))
     if raw.get("bf16"):
@@ -109,48 +98,6 @@ def _runtime_dict(raw: dict[str, Any]) -> dict[str, Any]:
 def _backend_for_task(task_id: str) -> str:
     spec = get_task(task_id)
     return "hf_trainer" if spec.backend == "transformers" else "ultralytics"
-
-
-def _column_mapping_for_task(task_id: str, raw: dict[str, Any]) -> dict[str, str]:
-    if task_id == "classify":
-        return {
-            "image": str(raw.get("image_column_name", "image")),
-            "label": str(raw.get("label_column_name", "label")),
-        }
-    if task_id == "detect":
-        return {
-            "image": str(raw.get("image_column_name", "image")),
-            "objects": str(raw.get("objects_column_name", "objects")),
-        }
-    if task_id == "segment":
-        return {
-            "image": str(raw.get("image_column_name", "image")),
-            "mask": str(raw.get("mask_column_name", "mask")),
-        }
-    if task_id == "semantic_segment":
-        return {
-            "image": str(raw.get("image_column_name", "image")),
-            "mask": str(raw.get("mask_column_name", "mask")),
-        }
-    if task_id in ("instance_segment", "universal_segment"):
-        return {
-            "image": str(raw.get("image_column_name", "image")),
-            "annotation": str(raw.get("annotation_column_name", "annotation")),
-        }
-    if task_id in ("detect_yolo", "track_yolo", "pose_yolo", "obb_yolo"):
-        return {"image": "image", "objects": "objects"}
-    if task_id == "segment_yolo":
-        return {
-            "image": "image",
-            "objects": "objects",
-            "mask": str(raw.get("mask_column") or "mask"),
-        }
-    if task_id == "classify_yolo":
-        return {
-            "image": "image",
-            "label": str(raw.get("label_column", "label")),
-        }
-    raise SystemExit(f"compile_launch_contract: unsupported task {task_id!r}")
 
 
 def _dataset_revision(raw: dict[str, Any]) -> str:
@@ -285,8 +232,6 @@ def _pipeline_to_mapping_with_yaml_promotion(
 
 def _try_hub_resolved_contract_dict(*, task_id: str, raw: dict[str, Any]) -> dict[str, Any] | None:
     """Return a full contract dict when Hub inspect + resolvers apply; else ``None``."""
-    if os.environ.get("VISION_CONTRACT_OFFLINE", "").strip().lower() in ("1", "true", "yes"):
-        return None
     defaults = _default_profile_and_pipeline(task_id)
     if defaults is None:
         return None
@@ -358,9 +303,36 @@ def _try_hub_resolved_contract_dict(*, task_id: str, raw: dict[str, Any]) -> dic
     }
 
 
+def _raise_flat_config_unresolved(*, task_id: str, raw: dict[str, Any]) -> NoReturn:
+    """Fail compile when flat YAML cannot be turned into a contract via Hub resolution."""
+    reasons: list[str] = []
+    ds = raw.get("dataset_name")
+    if isinstance(ds, str) and ds.strip() and Path(ds.strip()).exists():
+        reasons.append(
+            f"dataset_name looks like a local path ({ds!r}). "
+            "Use a Hugging Face Hub dataset id, or pass a complete RunContract YAML as your config."
+        )
+    if _default_profile_and_pipeline(task_id) is None:
+        reasons.append(
+            f"task {task_id!r} has no default Hub profile/pipeline wiring in compile_launch_contract; "
+            "hand-author a RunContract file (contract_version: 1, task, backend, dataset, model, pipeline, …)."
+        )
+    if not reasons:
+        reasons.append(
+            "Hub dataset inspection + profile/pipeline resolution did not produce a contract "
+            "(check HF_TOKEN, dataset id, revision, split, and resolver compatibility)."
+        )
+    raise SystemExit(
+        "Cannot compile flat experiment YAML without successful Hub resolution.\n"
+        + "\n".join(f"  • {line}" for line in reasons)
+        + "\n\nRemedies:\n"
+        "  • Fix Hub access and dataset metadata, or\n"
+        "  • Store a full RunContract YAML and point --config at it (launchers validate and forward it)."
+    )
+
+
 def experiment_config_to_contract_dict(*, task_id: str, raw: dict[str, Any]) -> dict[str, Any]:
-    """Build a run-contract mapping from a legacy flat experiment config dict."""
-    spec = get_task(task_id)
+    """Build a run-contract mapping from a flat experiment config dict (Hub resolution only)."""
     if raw.get("task_type") is not None and str(raw["task_type"]).strip() != task_id:
         raise SystemExit(
             f"task_type mismatch: CLI/task={task_id!r} but config has task_type={raw.get('task_type')!r}"
@@ -370,33 +342,7 @@ def experiment_config_to_contract_dict(*, task_id: str, raw: dict[str, Any]) -> 
     if resolved is not None:
         return resolved
 
-    dataset_name = raw.get("dataset_name")
-    if not dataset_name or not isinstance(dataset_name, str):
-        raise SystemExit("dataset_name is required in experiment config")
-    split = str(raw.get("dataset_split") or raw.get("train_split") or "train").strip()
-
-    return {
-        "contract_version": CONTRACT_VERSION,
-        "task": task_id,
-        "backend": _backend_for_task(task_id),
-        "dataset": {
-            "source": "hf_hub",
-            "identifier": str(dataset_name).strip(),
-            "revision": _dataset_revision(raw),
-            "config_name": raw.get("dataset_config_name"),
-            "split": split,
-            "profile_id": f"{spec.dataset_schema_kind}.legacy",
-            "column_mapping": _column_mapping_for_task(task_id, raw),
-        },
-        "model": {
-            "model_id": _model_id_or_exit(raw),
-            "loader_strategy": str(raw.get("model_loader", "auto_task_head")).strip(),
-            "architecture_hints": _architecture_hints(raw, task_id=task_id),
-        },
-        "pipeline": _pipeline_dict_legacy(task_id=task_id, raw=raw),
-        "training": {"hyperparameters": _hyperparameters_for_contract(task_id, raw)},
-        "runtime": _runtime_dict(raw),
-    }
+    _raise_flat_config_unresolved(task_id=task_id, raw=raw)
 
 
 def _model_id_or_exit(raw: dict[str, Any]) -> str:

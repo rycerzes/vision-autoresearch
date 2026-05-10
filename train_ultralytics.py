@@ -485,10 +485,13 @@ def read_segment_metrics(run_dir: Path) -> dict[str, float]:
 def _assert_pose_keypoints(dataset: Any, ledger_task: str) -> None:
     if ledger_task != "pose_yolo":
         return
-    ex0 = dataset["train"][0]["objects"]
-    if "keypoints" not in ex0:
-        logger.warning(
-            "pose_yolo dataset has no objects['keypoints']; using synthetic center keypoints for smoke compatibility."
+    objects = dataset["train"][0].get("objects")
+    if not isinstance(objects, dict):
+        raise SystemExit("pose_yolo requires each example to have an objects mapping.")
+    if objects.get("keypoints") is None:
+        raise SystemExit(
+            "pose_yolo requires objects['keypoints'] per instance (same length as bbox); "
+            "synthetic keypoints are not supported."
         )
 
 
@@ -742,11 +745,13 @@ def pose_label_lines(example: dict[str, Any], img_w: int, img_h: int) -> list[st
     cats = objects["category"]
     kpts_all = objects.get("keypoints")
     if kpts_all is None:
-        # Synthetic single visible keypoint at bbox center (smoke fallback).
-        kpts_all = []
-        for bbox in bboxes:
-            x, y, w, h = [float(v) for v in bbox]
-            kpts_all.append([x + 0.5 * w, y + 0.5 * h, 2.0])
+        raise SystemExit(
+            "pose_yolo export requires objects['keypoints'] for each row (aligned with bbox)."
+        )
+    if len(kpts_all) != len(bboxes):
+        raise SystemExit(
+            f"pose_yolo: len(keypoints)={len(kpts_all)} does not match len(bbox)={len(bboxes)}."
+        )
 
     lines: list[str] = []
     for bbox, cat, kpts in zip(bboxes, cats, kpts_all):
@@ -790,18 +795,13 @@ def obb_label_lines(example: dict[str, Any], img_w: int, img_h: int) -> list[str
             wn, hn = w / img_w, h / img_h
             lines.append(f"{cid} {cxn:.6f} {cyn:.6f} {wn:.6f} {hn:.6f} {theta:.6f}")
         elif len(vals) == 4:
-            # Axis-aligned xywh fallback for smoke/local compatibility.
-            x, y, w, h = vals
-            x1, y1 = x / img_w, y / img_h
-            x2, y2 = (x + w) / img_w, y1
-            x3, y3 = x2, (y + h) / img_h
-            x4, y4 = x1, y3
-            lines.append(
-                f"{cid} {x1:.6f} {y1:.6f} {x2:.6f} {y2:.6f} {x3:.6f} {y3:.6f} {x4:.6f} {y4:.6f}"
+            raise SystemExit(
+                "obb_yolo does not accept 4-value xywh boxes; use 5 values (cx,cy,w,h,theta) or "
+                "8 corner coordinates. For axis-aligned xywh detection use task detect_yolo."
             )
         else:
             raise SystemExit(
-                f"obb_yolo expects each bbox to have 4 (xywh), 5 (cx,cy,w,h,theta), or 8 (corner x,y...) "
+                f"obb_yolo expects each bbox to have 5 (cx,cy,w,h,theta) or 8 (corner x,y ...) "
                 f"values; got len={len(vals)}"
             )
     return lines
@@ -875,15 +875,17 @@ def collect_mask_label_values(ds: Dataset, mask_col: str, max_samples: int = 256
 
 
 def resolve_mask_column(ds: Dataset, explicit: str | None) -> str:
-    if explicit and explicit in ds.column_names:
-        return explicit
-    for c in ("label", "annotation", "mask", "segmentation_mask", "segmentation"):
-        if c in ds.column_names:
-            return c
-    raise SystemExit(
-        "segment_yolo: could not find a mask column; set yolo.mask_column in YAML "
-        f"(columns: {ds.column_names})"
-    )
+    if not explicit or not str(explicit).strip():
+        raise SystemExit(
+            "segment_yolo: contract must set dataset.column_mapping role 'mask' (via compile); "
+            "cannot infer mask column at runtime."
+        )
+    name = str(explicit).strip()
+    if name not in ds.column_names:
+        raise SystemExit(
+            f"segment_yolo: mask column {name!r} not in dataset columns {ds.column_names}"
+        )
+    return name
 
 
 def prepare_classify_dataset(
@@ -894,10 +896,12 @@ def prepare_classify_dataset(
     dataset = _load_yolo_hub_dataset(model_args, data_args)
     label_col = data_args.label_column
     if label_col not in dataset["train"].column_names:
-        label_col = "labels" if "labels" in dataset["train"].column_names else label_col
-
-    feat = dataset["train"].features.get(label_col)
+        raise SystemExit(
+            f"classify_yolo: label column {label_col!r} not in training split columns "
+            f"{dataset['train'].column_names}"
+        )
     cls_key = "_yolo_cls_id"
+    feat = dataset["train"].features.get(label_col)
 
     if feat is not None and hasattr(feat, "names") and feat.names:
         id2label = {i: str(n) for i, n in enumerate(feat.names)}

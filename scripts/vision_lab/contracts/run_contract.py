@@ -10,6 +10,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
 from typing import Any, Literal
 
 from vision_lab.metrics import MetricDirection
@@ -131,10 +132,10 @@ def contract_fingerprint_from_payload(payload: JSONValue) -> str:
 
 
 def _dataclass_to_primitive(obj: Any) -> Any:
+    if isinstance(obj, Enum):
+        return obj.value
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
-    if isinstance(obj, MetricDirection):
-        return obj.value
     if isinstance(obj, (list, tuple)):
         return [_dataclass_to_primitive(x) for x in obj]
     if isinstance(obj, dict):

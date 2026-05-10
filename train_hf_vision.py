@@ -210,7 +210,6 @@ def _dispatch_hf_trainer_contract(contract_path: Path) -> None:
             adaptation_mode,
             training_args,
             start_time,
-            strict_columns=True,
         )
         return
 
@@ -322,7 +321,6 @@ def _dispatch_hf_trainer_contract(contract_path: Path) -> None:
             adaptation_mode=adaptation_mode,
             training_args=training_args,
             start_time=start_time,
-            strict_columns=True,
         )
         return
 
@@ -347,8 +345,6 @@ def _run_classify(
     adaptation_mode: str,
     training_args: TrainingArguments,
     start_time: float,
-    *,
-    strict_columns: bool = False,
 ) -> None:
     dataset = load_dataset(
         data_args.dataset_name,
@@ -359,26 +355,11 @@ def _run_classify(
     )
 
     label_col = data_args.label_column_name
-    if strict_columns:
-        if label_col not in dataset["train"].column_names:
-            raise ValueError(
-                f"Label column {label_col!r} not found (strict_columns). "
-                f"Available: {dataset['train'].column_names}"
-            )
-    elif label_col not in dataset["train"].column_names:
-        candidates = [
-            c
-            for c in dataset["train"].column_names
-            if c in ("label", "labels", "class", "fine_label")
-        ]
-        if candidates:
-            label_col = candidates[0]
-            logger.info("Label column %r missing; using %r", data_args.label_column_name, label_col)
-        else:
-            raise ValueError(
-                f"Label column {data_args.label_column_name!r} not found. "
-                f"Available: {dataset['train'].column_names}"
-            )
+    if label_col not in dataset["train"].column_names:
+        raise ValueError(
+            f"Label column {label_col!r} not in dataset. "
+            f"Available: {dataset['train'].column_names}"
+        )
 
     label_feature = dataset["train"].features[label_col]
     if hasattr(label_feature, "names"):
@@ -596,26 +577,9 @@ def _run_semantic_segment(
     image_col = data_args.image_column_name
     mask_col = data_args.mask_column_name
     if mask_col not in dataset["train"].column_names:
-        candidates = [
-            c
-            for c in (
-                "mask",
-                "label",
-                "annotation",
-                "segmentation_mask",
-                "semantic_mask",
-                "label_map",
-            )
-            if c in dataset["train"].column_names
-        ]
-        if candidates:
-            mask_col = candidates[0]
-            logger.info("Mask column %r missing; using %r", data_args.mask_column_name, mask_col)
-        else:
-            raise ValueError(
-                f"Mask column {data_args.mask_column_name!r} not found. "
-                f"Available: {dataset['train'].column_names}"
-            )
+        raise ValueError(
+            f"Mask column {mask_col!r} not in dataset. Available: {dataset['train'].column_names}"
+        )
 
     id2label, label2id, raw_to_contiguous = _discover_semantic_labels(dataset, mask_col)
     logger.info("Discovered semantic classes: %s", id2label)
@@ -1086,7 +1050,6 @@ def _run_dense_instance_or_universal(
     adaptation_mode: str,
     training_args: TrainingArguments,
     start_time: float,
-    strict_columns: bool = False,
 ) -> None:
     training_args.remove_unused_columns = False
     dataset = load_dataset(
@@ -1108,37 +1071,11 @@ def _run_dense_instance_or_universal(
 
     image_col = data_args.image_column_name
     annotation_col = data_args.annotation_column_name
-    if strict_columns:
-        if annotation_col not in dataset["train"].column_names:
-            raise ValueError(
-                f"Annotation column {annotation_col!r} not found (strict_columns). "
-                f"Available: {dataset['train'].column_names}"
-            )
-    elif annotation_col not in dataset["train"].column_names:
-        candidates = [
-            c
-            for c in (
-                "annotation",
-                "panoptic_mask",
-                "panoptic_masks",
-                "segmentation",
-                "mask",
-                "label",
-            )
-            if c in dataset["train"].column_names
-        ]
-        if candidates:
-            annotation_col = candidates[0]
-            logger.info(
-                "Annotation column %r missing; using %r",
-                data_args.annotation_column_name,
-                annotation_col,
-            )
-        else:
-            raise ValueError(
-                f"Annotation column {data_args.annotation_column_name!r} not found. "
-                f"Available: {dataset['train'].column_names}"
-            )
+    if annotation_col not in dataset["train"].column_names:
+        raise ValueError(
+            f"Annotation column {annotation_col!r} not in dataset. "
+            f"Available: {dataset['train'].column_names}"
+        )
 
     id2label, label2id, raw_to_contiguous = _dense_label_maps(dataset, annotation_col)
     model, image_processor = load_hf_vision_model(

@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+RUNTIME_DIR = ROOT / ".runtime"
+LAST_LAUNCH_STATE_PATH = RUNTIME_DIR / "hf-job-last.json"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
@@ -93,6 +95,17 @@ def main() -> int:
     contract_path.parent.mkdir(parents=True, exist_ok=True)
     compile_config_file_to_path(task_id=task, config_path=config_path, output_path=contract_path)
 
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    launch_state = {
+        "launcher": "run_local",
+        "task": task,
+        "config": str(config_path),
+        "contract_path": str(contract_path.resolve()),
+    }
+    LAST_LAUNCH_STATE_PATH.write_text(
+        json.dumps(launch_state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
     print(f"Running {train_script.name} with {contract_path.name} (compiled from {config_path.name})")
     print(f"Log: {log_path}")
 
@@ -116,6 +129,12 @@ def main() -> int:
     elapsed = time.time() - start
 
     print(f"\nCompleted in {elapsed:.1f}s with exit code {rc}")
+
+    # Refresh launch state so submit_patch can resolve log + contract without recompile.
+    merged = {**launch_state, "cached_log_path": str(log_path.resolve())}
+    LAST_LAUNCH_STATE_PATH.write_text(
+        json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     if rc != 0:
         print(f"Training failed. Log: {log_path}")

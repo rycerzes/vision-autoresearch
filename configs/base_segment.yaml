@@ -1,5 +1,8 @@
 # Base config for SAM/SAM2 segmentation fine-tuning
 # Experiments modify this file; training scripts are stable infrastructure.
+#
+# Contract-first: flat YAML may not compile for this task; see configs/examples/run_contract_segment.yaml
+# and configs/examples/README.md for a hand-authored RunContract template.
 
 task_type: segment
 backend: transformers

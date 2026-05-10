@@ -1,9 +1,8 @@
 """Ultralytics YOLO training for multiple CV tasks using Hugging Face Hub datasets.
 
-Stable infrastructure — experiments modify config YAMLs only.
+Stable infrastructure — the trainer entry is a validated ``RunContract`` file only:
 
-Entrypoint: **only** ``train_ultralytics.py`` for all ``*_yolo`` tasks (via config
-``task_type``).
+  ``train_ultralytics.py <run-contract.yaml|run-contract.json>``
 
 Supported ``task_type`` values (default promotion primary in parentheses; see
 ``vision_lab.task_registry`` and ``vision_lab.metrics``):
@@ -18,9 +17,9 @@ applicable; remaining numeric keys are emitted after those in sorted order.
 use the same detection dataset contract; tracking inference is separate.
 
 Ultralytics hyperparameters
-  Top-level YAML key ``ultralytics_train`` (mapping) is passed to the model's
-  ``.train()`` method, merged with Ultralytics defaults. Keys not listed there are
-  filled from ``TrainingArguments`` / ``YoloDataArguments`` where they overlap
+  Contract field ``training.hyperparameters`` may include ``ultralytics_train`` (mapping)
+  passed to the model's ``.train()`` method, merged with Ultralytics defaults. Keys not
+  listed there are filled from ``TrainingArguments`` / ``YoloDataArguments`` where they overlap
   Ultralytics names: ``epochs`` ← ``num_train_epochs``,
   ``batch`` ← ``per_device_train_batch_size``, ``imgsz`` ← ``image_square_size``,
   ``workers`` ← ``dataloader_num_workers``, ``seed``, ``amp`` ← ``fp16``.
@@ -32,7 +31,7 @@ Ultralytics hyperparameters
   Optional string key ``ultralytics_train.trainer`` names a trainer class (e.g.
   ``YOLOEPESegTrainer``, ``WorldTrainer``); see Ultralytics docs for YOLOE / YOLO-World.
 
-Ultralytics bridge (optional top-level YAML ``ultralytics_bridge``)
+Ultralytics bridge (optional mapping under contract ``training.hyperparameters`` as ``ultralytics_bridge``)
   ``model_class`` (``auto`` | ``yolo`` | ``yoloe`` | ``yolo_world`` | ``rtdetr``):
     Which Ultralytics entry type loads ``model_name_or_path``. ``auto`` uses
     ``YOLO(...)``, which switches to YOLOWorld / YOLOE / RT-DETR when the weight
@@ -350,6 +349,10 @@ LEDGER_TASKS = frozenset(
 class YoloDataArguments:
     dataset_name: str = field(default="cppe-5", metadata={"help": "HF Hub dataset name."})
     dataset_config_name: str | None = field(default=None, metadata={"help": "Dataset config name."})
+    dataset_revision: str | None = field(
+        default=None,
+        metadata={"help": "Optional Hub dataset revision (commit, tag, or branch)."},
+    )
     train_val_split: float | None = field(
         default=0.15,
         metadata={"help": "Holdout fraction from train when no validation split exists."},
@@ -639,17 +642,25 @@ def bbox_to_yolo_line(bbox: list[float], cat_id: int, img_w: int, img_h: int) ->
     return f"{int(cat_id)} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}"
 
 
+def _load_yolo_hub_dataset(
+    model_args: ModelArguments,
+    data_args: YoloDataArguments,
+) -> DatasetDict:
+    kw: dict[str, Any] = {
+        "cache_dir": model_args.cache_dir,
+        "trust_remote_code": model_args.trust_remote_code,
+    }
+    if data_args.dataset_revision:
+        kw["revision"] = data_args.dataset_revision
+    return cast(DatasetDict, load_dataset(data_args.dataset_name, data_args.dataset_config_name, **kw))
+
+
 def prepare_detection_like_dataset(
     model_args: ModelArguments,
     data_args: YoloDataArguments,
     training_args: TrainingArguments,
 ) -> tuple[DatasetDict, dict[int, str]]:
-    dataset = load_dataset(
-        data_args.dataset_name,
-        data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        trust_remote_code=model_args.trust_remote_code,
-    )
+    dataset = _load_yolo_hub_dataset(model_args, data_args)
     bbox_format = detect_bbox_format_from_samples(dataset["train"])
     if bbox_format == "xyxy":
         logger.info("Converting bboxes from xyxy → xywh before YOLO export")
@@ -880,12 +891,7 @@ def prepare_classify_dataset(
     data_args: YoloDataArguments,
     training_args: TrainingArguments,
 ) -> tuple[DatasetDict, dict[int, str], str]:
-    dataset = load_dataset(
-        data_args.dataset_name,
-        data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        trust_remote_code=model_args.trust_remote_code,
-    )
+    dataset = _load_yolo_hub_dataset(model_args, data_args)
     label_col = data_args.label_column
     if label_col not in dataset["train"].column_names:
         label_col = "labels" if "labels" in dataset["train"].column_names else label_col
@@ -1092,12 +1098,7 @@ def run_segment_yolo(
     ultralytics_train: dict[str, Any],
     bridge: dict[str, Any],
 ) -> None:
-    dataset = load_dataset(
-        data_args.dataset_name,
-        data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        trust_remote_code=model_args.trust_remote_code,
-    )
+    dataset = _load_yolo_hub_dataset(model_args, data_args)
     dataset["train"] = dataset["train"].shuffle(seed=training_args.seed)
     tv_split = None if "validation" in dataset else data_args.train_val_split
     if isinstance(tv_split, float) and tv_split > 0.0:
@@ -1213,30 +1214,36 @@ def run_classify_yolo(
     )
 
 
-def main() -> None:
-    start_time = time.time()
+def _run_ultralytics_from_contract(contract_path: Path, *, start_time: float) -> None:
+    from vision_lab.contracts.loader import load_run_contract
 
-    if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
-        raise SystemExit("Usage: train_ultralytics.py <config.yaml|config.json>")
-
-    cfg_path = Path(sys.argv[1]).resolve()
-    raw_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-    if not isinstance(raw_cfg, dict):
-        raise SystemExit("Config must be a YAML mapping")
-    ledger_task = raw_cfg.get("task_type")
+    contract = load_run_contract(contract_path)
+    if contract.backend != "ultralytics":
+        raise SystemExit(f"Expected run contract backend 'ultralytics'; got {contract.backend!r}")
+    ledger_task = contract.task
     if ledger_task not in LEDGER_TASKS:
-        raise SystemExit(f"task_type must be one of {sorted(LEDGER_TASKS)}; got {ledger_task!r}")
-
-    ultralytics_train = _coerce_ultralytics_train_block(raw_cfg.get("ultralytics_train"), cfg_path)
-    bridge = _coerce_ultralytics_bridge(raw_cfg.get("ultralytics_bridge"), cfg_path)
-
+        raise SystemExit(f"task must be one of {sorted(LEDGER_TASKS)}; got {ledger_task!r}")
+    hp = dict(contract.training.hyperparameters)
+    ut_raw = hp.pop("ultralytics_train", {})
+    ub_raw = hp.pop("ultralytics_bridge", {})
+    ultralytics_train = _coerce_ultralytics_train_block(
+        ut_raw if isinstance(ut_raw, dict) else {}, contract_path
+    )
+    bridge = _coerce_ultralytics_bridge(ub_raw if isinstance(ub_raw, dict) else {}, contract_path)
+    flat: dict[str, Any] = dict(hp)
+    flat["model_name_or_path"] = contract.model.model_id
+    flat["dataset_name"] = contract.dataset.identifier
+    if contract.dataset.config_name is not None:
+        flat["dataset_config_name"] = contract.dataset.config_name
+    flat["dataset_revision"] = contract.dataset.revision
+    roles = dict(contract.dataset.column_mapping)
+    if ledger_task == "classify_yolo" and "label" in roles:
+        flat["label_column"] = roles["label"]
+    hints = dict(contract.model.architecture_hints)
+    if hints.get("objects_category_field") is not None:
+        flat["objects_category_field"] = hints["objects_category_field"]
     parser = HfArgumentParser(cast(Any, (ModelArguments, YoloDataArguments, TrainingArguments)))
-    if cfg_path.suffix.lower() in {".yaml", ".yml"}:
-        model_args, data_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(cfg_path), allow_extra_keys=True
-        )
-    else:
-        model_args, data_args, training_args = parser.parse_json_file(json_file=str(cfg_path))
+    model_args, data_args, training_args = parser.parse_dict(flat, allow_extra_keys=True)
 
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("hfjob")
     if hf_token:
@@ -1298,6 +1305,16 @@ def main() -> None:
         )
     else:
         raise SystemExit(f"Unhandled task_type: {ledger_task}")
+
+
+def main() -> None:
+    start_time = time.time()
+    if len(sys.argv) != 2:
+        raise SystemExit("Usage: train_ultralytics.py <run-contract.yaml|run-contract.json>")
+    contract_path = Path(os.path.abspath(sys.argv[1]))
+    if not contract_path.is_file():
+        raise SystemExit(f"Run contract path is not a file: {contract_path}")
+    _run_ultralytics_from_contract(contract_path, start_time=start_time)
 
 
 if __name__ == "__main__":

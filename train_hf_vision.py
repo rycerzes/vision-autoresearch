@@ -1,6 +1,8 @@
 """Shared Hugging Face vision trainer entrypoint (model loaders + adaptation modes).
 
-Stable infrastructure — experiments modify config YAMLs only.
+Stable infrastructure — the trainer entry is a validated ``RunContract`` file only:
+
+  ``train_hf_vision.py <run-contract.yaml|run-contract.json>``
 
 Configs use ``model_loader`` (``auto_task_head`` | ``auto_model`` | ``auto_backbone``) and
 ``adaptation_mode`` (full fine-tune, frozen backbone / linear probe, eval-only, …). Supported
@@ -12,7 +14,6 @@ task-head Transformers models are the forward-only training path.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -28,8 +29,6 @@ import evaluate
 import numpy as np
 import torch
 import torch.nn.functional as F
-import transformers
-import yaml
 from datasets import load_dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from transformers import DefaultDataCollator, HfArgumentParser, Trainer, TrainingArguments
@@ -43,28 +42,15 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from vision_lab.hf_vision import apply_adaptation_mode, build_transforms, load_hf_vision_model
 from vision_lab.hf_vision.constants import (
     ADAPTATION_MODE_CHOICES,
-    HF_VISION_SUPPORTED_TASKS,
-    MODEL_LOADER_CHOICES,
     ROUTED_TASK_IDS,
 )
-from vision_lab.hf_vision.detect_train import run_from_config as _run_detect_from_config
 from vision_lab.hf_vision.runner_session import (
     finish_trackio_session,
     setup_hf_training_environment,
 )
-from vision_lab.hf_vision.segment_train import run_from_config as _run_segment_from_config
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
-
-
-def _load_raw_config(config_path: Path) -> dict[str, Any]:
-    text = config_path.read_text(encoding="utf-8")
-    if config_path.suffix.lower() == ".json":
-        data = json.loads(text)
-    else:
-        data = yaml.safe_load(text)
-    return data if isinstance(data, dict) else {}
 
 
 @dataclass
@@ -118,6 +104,10 @@ class DataArguments:
 
     dataset_name: str = field(default="ethz/food101", metadata={"help": "HF dataset id."})
     dataset_config_name: str | None = field(default=None, metadata={"help": "HF config name."})
+    dataset_revision: str | None = field(
+        default=None,
+        metadata={"help": "Optional Hub dataset revision (commit, tag, or branch)."},
+    )
     train_val_split: float | None = field(
         default=0.15,
         metadata={"help": "Fraction held out from train when no validation split exists."},
@@ -156,92 +146,198 @@ class AdaptationArguments:
     )
 
 
-def main() -> None:
-    if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
-        raise SystemExit("Usage: train_hf_vision.py <config.yaml|config.json>")
+def _dispatch_hf_trainer_contract(contract_path: Path) -> None:
+    """Execute a resolved ``RunContract`` (``hf_trainer`` backend) without YAML task routing."""
+    from vision_lab.contracts.loader import load_run_contract
+    from vision_lab.hf_vision.detect_train import (
+        DataTrainingArguments as DetDataArguments,
+    )
+    from vision_lab.hf_vision.detect_train import (
+        ModelArguments as DetModelArguments,
+    )
+    from vision_lab.hf_vision.detect_train import (
+        run_detect_training,
+    )
+    from vision_lab.hf_vision.segment_train import (
+        DataTrainingArguments as SegDataArguments,
+    )
+    from vision_lab.hf_vision.segment_train import (
+        ModelArguments as SegModelArguments,
+    )
+    from vision_lab.hf_vision.segment_train import (
+        run_segment_training,
+    )
 
-    cfg_path = Path(os.path.abspath(sys.argv[1]))
-    raw = _load_raw_config(cfg_path)
-    task = str(raw.get("task_type", "")).strip()
-    if task not in ROUTED_TASK_IDS:
-        raise SystemExit(
-            f"Unsupported task_type={task!r} for train_hf_vision (expected one of {sorted(ROUTED_TASK_IDS)})."
+    contract = load_run_contract(contract_path)
+    if contract.backend != "hf_trainer":
+        raise SystemExit(f"Expected run contract backend 'hf_trainer'; got {contract.backend!r}")
+    roles = dict(contract.dataset.column_mapping)
+    hp = dict(contract.training.hyperparameters)
+    tr_parser = HfArgumentParser(cast(Any, (TrainingArguments,)))
+    training_args, = tr_parser.parse_dict(hp, allow_extra_keys=True)
+
+    task = contract.task
+    hints = dict(contract.model.architecture_hints)
+
+    if task == "classify":
+        if "image" not in roles or "label" not in roles:
+            raise SystemExit("classify run-contract requires column_mapping roles 'image' and 'label'.")
+        model_args = ModelArguments(
+            model_name_or_path=contract.model.model_id,
+            model_loader=contract.model.loader_strategy,
+            config_name=hints.get("config_name") if hints.get("config_name") is not None else None,
+            cache_dir=str(hints["cache_dir"]) if hints.get("cache_dir") is not None else None,
+            model_revision=str(hints.get("model_revision", "main")),
+            image_processor_name=hints.get("image_processor_name"),
+            ignore_mismatched_sizes=bool(hints.get("ignore_mismatched_sizes", True)),
+            token=str(hints["token"]) if hints.get("token") is not None else None,
+            trust_remote_code=bool(hints.get("trust_remote_code", False)),
         )
+        adaptation_mode = str(hints.get("adaptation_mode", "full_finetune")).strip()
+        data_args = DataArguments(
+            dataset_name=contract.dataset.identifier,
+            dataset_config_name=contract.dataset.config_name,
+            dataset_revision=contract.dataset.revision,
+            image_column_name=roles["image"],
+            label_column_name=roles["label"],
+        )
+        start_time = time.time()
+        setup_hf_training_environment(training_args, logger=logger)
+        _run_classify(
+            task,
+            model_args,
+            data_args,
+            adaptation_mode,
+            training_args,
+            start_time,
+            strict_columns=True,
+        )
+        return
+
     if task == "detect":
-        _run_detect_from_config(cfg_path)
+        if "image" not in roles or "objects" not in roles:
+            raise SystemExit("detect run-contract requires column_mapping roles 'image' and 'objects'.")
+        flat: dict[str, Any] = dict(hp)
+        flat.setdefault("model_name_or_path", contract.model.model_id)
+        flat.setdefault("model_loader", contract.model.loader_strategy)
+        flat.setdefault("dataset_name", contract.dataset.identifier)
+        if contract.dataset.config_name is not None:
+            flat["dataset_config_name"] = contract.dataset.config_name
+        flat["dataset_revision"] = contract.dataset.revision
+        flat["image_column_name"] = roles["image"]
+        flat["objects_column_name"] = roles["objects"]
+        if hints.get("adaptation_mode") is not None:
+            flat["adaptation_mode"] = str(hints["adaptation_mode"])
+        dparser = HfArgumentParser(cast(Any, (DetModelArguments, DetDataArguments, TrainingArguments)))
+        det_model, det_data, det_train = dparser.parse_dict(flat, allow_extra_keys=True)
+        run_detect_training(det_model, det_data, det_train)
         return
+
     if task == "segment":
-        _run_segment_from_config(cfg_path)
+        if "image" not in roles or "mask" not in roles:
+            raise SystemExit("segment run-contract requires column_mapping roles 'image' and 'mask'.")
+        flat = dict(hp)
+        flat.setdefault("model_name_or_path", contract.model.model_id)
+        flat.setdefault("model_loader", contract.model.loader_strategy)
+        flat.setdefault("dataset_name", contract.dataset.identifier)
+        if contract.dataset.config_name is not None:
+            flat["dataset_config_name"] = contract.dataset.config_name
+        flat["dataset_revision"] = contract.dataset.revision
+        flat["image_column_name"] = roles["image"]
+        flat["mask_column_name"] = roles["mask"]
+        if hints.get("prompt_type") is not None:
+            flat["prompt_type"] = str(hints["prompt_type"])
+        if hints.get("prompt_column_name") is not None:
+            flat["prompt_column_name"] = hints["prompt_column_name"]
+        if hints.get("bbox_column_name") is not None:
+            flat["bbox_column_name"] = hints["bbox_column_name"]
+        if hints.get("point_column_name") is not None:
+            flat["point_column_name"] = hints["point_column_name"]
+        if hints.get("adaptation_mode") is not None:
+            flat["adaptation_mode"] = str(hints["adaptation_mode"])
+        sparser = HfArgumentParser(cast(Any, (SegModelArguments, SegDataArguments, TrainingArguments)))
+        seg_model, seg_data, seg_train = sparser.parse_dict(flat, allow_extra_keys=True)
+        run_segment_training(seg_model, seg_data, seg_train)
         return
+
     if task == "semantic_segment":
-        _run_semantic_segment_from_config(cfg_path)
+        if "image" not in roles or "mask" not in roles:
+            raise SystemExit(
+                "semantic_segment run-contract requires column_mapping roles 'image' and 'mask'."
+            )
+        model_args = ModelArguments(
+            model_name_or_path=contract.model.model_id,
+            model_loader=contract.model.loader_strategy,
+            config_name=hints.get("config_name") if hints.get("config_name") is not None else None,
+            cache_dir=str(hints["cache_dir"]) if hints.get("cache_dir") is not None else None,
+            model_revision=str(hints.get("model_revision", "main")),
+            image_processor_name=hints.get("image_processor_name"),
+            ignore_mismatched_sizes=bool(hints.get("ignore_mismatched_sizes", True)),
+            token=str(hints["token"]) if hints.get("token") is not None else None,
+            trust_remote_code=bool(hints.get("trust_remote_code", False)),
+        )
+        adaptation_mode = str(hints.get("adaptation_mode", "full_finetune")).strip()
+        data_args = DataArguments(
+            dataset_name=contract.dataset.identifier,
+            dataset_config_name=contract.dataset.config_name,
+            dataset_revision=contract.dataset.revision,
+            image_column_name=roles["image"],
+            mask_column_name=roles["mask"],
+        )
+        start_time = time.time()
+        setup_hf_training_environment(training_args, logger=logger)
+        _run_semantic_segment(task, model_args, data_args, adaptation_mode, training_args, start_time)
         return
+
     if task in ("instance_segment", "universal_segment"):
-        _run_dense_instance_or_universal_from_config(cfg_path, task)
+        if "image" not in roles or "annotation" not in roles:
+            raise SystemExit(
+                f"{task} run-contract requires column_mapping roles 'image' and 'annotation'."
+            )
+        model_args = ModelArguments(
+            model_name_or_path=contract.model.model_id,
+            model_loader=contract.model.loader_strategy,
+            config_name=hints.get("config_name") if hints.get("config_name") is not None else None,
+            cache_dir=str(hints["cache_dir"]) if hints.get("cache_dir") is not None else None,
+            model_revision=str(hints.get("model_revision", "main")),
+            image_processor_name=hints.get("image_processor_name"),
+            ignore_mismatched_sizes=bool(hints.get("ignore_mismatched_sizes", True)),
+            token=str(hints["token"]) if hints.get("token") is not None else None,
+            trust_remote_code=bool(hints.get("trust_remote_code", False)),
+        )
+        adaptation_mode = str(hints.get("adaptation_mode", "full_finetune")).strip()
+        data_args = DataArguments(
+            dataset_name=contract.dataset.identifier,
+            dataset_config_name=contract.dataset.config_name,
+            dataset_revision=contract.dataset.revision,
+            image_column_name=roles["image"],
+            annotation_column_name=roles["annotation"],
+        )
+        start_time = time.time()
+        setup_hf_training_environment(training_args, logger=logger)
+        _run_dense_instance_or_universal(
+            task_type=task,
+            model_args=model_args,
+            data_args=data_args,
+            adaptation_mode=adaptation_mode,
+            training_args=training_args,
+            start_time=start_time,
+            strict_columns=True,
+        )
         return
 
-    start_time = time.time()
-    parser = HfArgumentParser(
-        cast(
-            Any,
-            (TaskArguments, ModelArguments, DataArguments, AdaptationArguments, TrainingArguments),
-        )
+    raise SystemExit(
+        f"Unsupported task {task!r} for hf_trainer run contract (supported: {sorted(ROUTED_TASK_IDS)})."
     )
 
-    if cfg_path.suffix.lower() in (".yaml", ".yml"):
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(cfg_path),
-            allow_extra_keys=True,
-        )
-    elif cfg_path.suffix.lower() == ".json":
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_json_file(
-            json_file=str(cfg_path)
-        )
-    else:
-        raise SystemExit("Config must be .yaml, .yml, or .json")
 
-    if str(task_args.task_type).strip() != "classify":
-        raise SystemExit(
-            f"Internal error: task_type={task_args.task_type!r} should have been routed before classification setup."
-        )
-
-    adaptation_mode = adaptation_args.adaptation_mode.strip()
-
-    if adaptation_mode not in ADAPTATION_MODE_CHOICES:
-        raise SystemExit(
-            f"Invalid adaptation_mode={adaptation_mode!r}; "
-            f"expected one of {sorted(ADAPTATION_MODE_CHOICES)}."
-        )
-
-    ml = model_args.model_loader.strip()
-    if ml not in MODEL_LOADER_CHOICES:
-        raise SystemExit(
-            f"Invalid model_loader={model_args.model_loader!r}; expected {sorted(MODEL_LOADER_CHOICES)}."
-        )
-
-    if task_args.task_type not in HF_VISION_SUPPORTED_TASKS:
-        raise SystemExit(
-            f"Internal error: classify must be in HF_VISION_SUPPORTED_TASKS ({sorted(HF_VISION_SUPPORTED_TASKS)})."
-        )
-
-    setup_hf_training_environment(training_args, logger=logger)
-
-    logger.info(
-        "HF vision runner: task=%s model_loader=%s adaptation_mode=%s",
-        task_args.task_type,
-        ml,
-        adaptation_mode,
-    )
-    logger.info("Training/evaluation parameters %s", training_args)
-
-    _run_classify(
-        task_args.task_type,
-        model_args,
-        data_args,
-        adaptation_mode,
-        training_args,
-        start_time,
-    )
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise SystemExit("Usage: train_hf_vision.py <run-contract.yaml|run-contract.json>")
+    contract_path = Path(os.path.abspath(sys.argv[1]))
+    if not contract_path.is_file():
+        raise SystemExit(f"Run contract path is not a file: {contract_path}")
+    _dispatch_hf_trainer_contract(contract_path)
 
 
 def _run_classify(
@@ -251,16 +347,25 @@ def _run_classify(
     adaptation_mode: str,
     training_args: TrainingArguments,
     start_time: float,
+    *,
+    strict_columns: bool = False,
 ) -> None:
     dataset = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
         cache_dir=model_args.cache_dir,
         trust_remote_code=model_args.trust_remote_code,
+        revision=data_args.dataset_revision,
     )
 
     label_col = data_args.label_column_name
-    if label_col not in dataset["train"].column_names:
+    if strict_columns:
+        if label_col not in dataset["train"].column_names:
+            raise ValueError(
+                f"Label column {label_col!r} not found (strict_columns). "
+                f"Available: {dataset['train'].column_names}"
+            )
+    elif label_col not in dataset["train"].column_names:
         candidates = [
             c
             for c in dataset["train"].column_names
@@ -427,50 +532,6 @@ def _run_classify(
         trainer.create_model_card(**kwargs)
 
 
-def _run_semantic_segment_from_config(config_path: Path) -> None:
-    start_time = time.time()
-    parser = HfArgumentParser(
-        cast(
-            Any,
-            (TaskArguments, ModelArguments, DataArguments, AdaptationArguments, TrainingArguments),
-        )
-    )
-    if config_path.suffix.lower() in (".yaml", ".yml"):
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(config_path),
-            allow_extra_keys=True,
-        )
-    elif config_path.suffix.lower() == ".json":
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_json_file(
-            json_file=str(config_path)
-        )
-    else:
-        raise SystemExit("Config must be .yaml, .yml, or .json")
-
-    if str(task_args.task_type).strip() != "semantic_segment":
-        raise SystemExit(
-            f"Expected task_type=semantic_segment in config, got {task_args.task_type!r}"
-        )
-
-    setup_hf_training_environment(training_args, logger=logger)
-    logger.info(
-        "HF vision runner: task=%s model_loader=%s adaptation_mode=%s",
-        task_args.task_type,
-        model_args.model_loader.strip(),
-        adaptation_args.adaptation_mode.strip(),
-    )
-    logger.info("Training/evaluation parameters %s", training_args)
-
-    _run_semantic_segment(
-        task_args.task_type,
-        model_args,
-        data_args,
-        adaptation_args.adaptation_mode.strip(),
-        training_args,
-        start_time,
-    )
-
-
 def _mask_to_array(mask: Any) -> np.ndarray:
     arr = np.asarray(mask)
     if arr.ndim == 3:
@@ -520,6 +581,7 @@ def _run_semantic_segment(
         data_args.dataset_config_name,
         cache_dir=model_args.cache_dir,
         trust_remote_code=model_args.trust_remote_code,
+        revision=data_args.dataset_revision,
     )
     if "train" not in dataset:
         raise ValueError(f"No 'train' split found. Available: {list(dataset.keys())}")
@@ -1016,41 +1078,6 @@ class PanopticSegmentationEvaluator:
         return {"pq": round(pq, 4), "sq": round(sq, 4), "rq": round(rq, 4)}
 
 
-def _run_dense_instance_or_universal_from_config(config_path: Path, task_type: str) -> None:
-    start_time = time.time()
-    parser = HfArgumentParser(
-        cast(
-            Any,
-            (TaskArguments, ModelArguments, DataArguments, AdaptationArguments, TrainingArguments),
-        )
-    )
-    if config_path.suffix.lower() in (".yaml", ".yml"):
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(config_path),
-            allow_extra_keys=True,
-        )
-    elif config_path.suffix.lower() == ".json":
-        task_args, model_args, data_args, adaptation_args, training_args = parser.parse_json_file(
-            json_file=str(config_path)
-        )
-    else:
-        raise SystemExit("Config must be .yaml, .yml, or .json")
-
-    parsed_task = str(task_args.task_type).strip()
-    if parsed_task != task_type:
-        raise SystemExit(f"Expected task_type={task_type} in config, got {task_args.task_type!r}")
-
-    setup_hf_training_environment(training_args, logger=logger)
-    _run_dense_instance_or_universal(
-        task_type=task_type,
-        model_args=model_args,
-        data_args=data_args,
-        adaptation_mode=adaptation_args.adaptation_mode.strip(),
-        training_args=training_args,
-        start_time=start_time,
-    )
-
-
 def _run_dense_instance_or_universal(
     *,
     task_type: str,
@@ -1059,6 +1086,7 @@ def _run_dense_instance_or_universal(
     adaptation_mode: str,
     training_args: TrainingArguments,
     start_time: float,
+    strict_columns: bool = False,
 ) -> None:
     training_args.remove_unused_columns = False
     dataset = load_dataset(
@@ -1066,6 +1094,7 @@ def _run_dense_instance_or_universal(
         data_args.dataset_config_name,
         cache_dir=model_args.cache_dir,
         trust_remote_code=model_args.trust_remote_code,
+        revision=data_args.dataset_revision,
     )
     if "train" not in dataset:
         raise ValueError(f"No 'train' split found. Available: {list(dataset.keys())}")
@@ -1079,7 +1108,13 @@ def _run_dense_instance_or_universal(
 
     image_col = data_args.image_column_name
     annotation_col = data_args.annotation_column_name
-    if annotation_col not in dataset["train"].column_names:
+    if strict_columns:
+        if annotation_col not in dataset["train"].column_names:
+            raise ValueError(
+                f"Annotation column {annotation_col!r} not found (strict_columns). "
+                f"Available: {dataset['train'].column_names}"
+            )
+    elif annotation_col not in dataset["train"].column_names:
         candidates = [
             c
             for c in (

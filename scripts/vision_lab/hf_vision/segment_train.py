@@ -21,7 +21,6 @@ from typing import Any, cast
 import numpy as np
 import torch
 import torch.nn.functional as F
-import transformers
 from datasets import load_dataset
 from monai.losses.dice import DiceCELoss
 from torch.utils.data import Dataset
@@ -33,7 +32,10 @@ from transformers import (
 
 from vision_lab.hf_vision.adaptation import apply_adaptation_mode
 from vision_lab.hf_vision.loaders import load_hf_vision_model
-from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.runner_session import (
+    finish_trackio_session,
+    setup_hf_training_environment,
+)
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
@@ -203,6 +205,10 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "Dataset config name."},
     )
+    dataset_revision: str | None = field(
+        default=None,
+        metadata={"help": "Optional Hub dataset revision (commit, tag, or branch)."},
+    )
     train_val_split: float | None = field(
         default=0.1,
         metadata={"help": "Fraction to split off for validation."},
@@ -265,25 +271,33 @@ class ModelArguments:
 
 def main():
     if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
-        raise SystemExit("segment_train is an internal runner slice; use train_hf_vision.py <config.yaml|json>.")
+        raise SystemExit(
+            "segment_train is an internal runner slice; invoke train_hf_vision.py <run-contract.yaml|json>."
+        )
     run_from_config(Path(os.path.abspath(sys.argv[1])))
 
 
-def run_from_config(config_path: Path) -> None:
-    start_time = time.time()
-
+def _parse_segment_config(
+    config_path: Path,
+) -> tuple[ModelArguments, DataTrainingArguments, TrainingArguments]:
     parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
-
     if config_path.suffix.lower() in (".yaml", ".yml"):
-        model_args, data_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(config_path), allow_extra_keys=True
-        )
-    elif config_path.suffix.lower() == ".json":
-        model_args, data_args, training_args = parser.parse_json_file(
-            json_file=str(config_path)
-        )
-    else:
-        raise SystemExit("Config must be .yaml, .yml, or .json")
+        return parser.parse_yaml_file(yaml_file=str(config_path), allow_extra_keys=True)
+    if config_path.suffix.lower() == ".json":
+        return parser.parse_json_file(json_file=str(config_path))
+    raise SystemExit("Config must be .yaml, .yml, or .json")
+
+
+def run_from_config(config_path: Path) -> None:
+    run_segment_training(*_parse_segment_config(config_path))
+
+
+def run_segment_training(
+    model_args: ModelArguments,
+    data_args: DataTrainingArguments,
+    training_args: TrainingArguments,
+) -> None:
+    start_time = time.time()
 
     setup_hf_training_environment(training_args, logger=logger)
 
@@ -297,12 +311,16 @@ def run_from_config(config_path: Path) -> None:
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Load dataset
+    ld_kwargs: dict[str, Any] = {
+        "cache_dir": model_args.cache_dir,
+        "trust_remote_code": model_args.trust_remote_code,
+    }
+    if data_args.dataset_revision:
+        ld_kwargs["revision"] = data_args.dataset_revision
     dataset = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        trust_remote_code=model_args.trust_remote_code,
+        **ld_kwargs,
     )
 
     if "train" not in dataset:

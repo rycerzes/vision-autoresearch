@@ -24,7 +24,6 @@ from typing import Any, cast
 import albumentations as A
 import numpy as np
 import torch
-import transformers
 from datasets import load_dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from transformers import (
@@ -39,7 +38,10 @@ from transformers.trainer_utils import EvalPrediction
 
 from vision_lab.hf_vision.adaptation import apply_adaptation_mode
 from vision_lab.hf_vision.loaders import load_hf_vision_model
-from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.runner_session import (
+    finish_trackio_session,
+    setup_hf_training_environment,
+)
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
@@ -457,6 +459,20 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "The configuration name of the dataset."},
     )
+    dataset_revision: str | None = field(
+        default=None,
+        metadata={"help": "Optional Hub dataset revision (commit, tag, or branch)."},
+    )
+    image_column_name: str = field(
+        default="image",
+        metadata={"help": "Column holding PIL images (renamed to 'image' before training if different)."},
+    )
+    objects_column_name: str = field(
+        default="objects",
+        metadata={
+            "help": "Nested objects column (renamed to 'objects' before training if different)."
+        },
+    )
     train_val_split: float | None = field(
         default=0.15,
         metadata={"help": "Fraction to split off of train for validation."},
@@ -527,23 +543,33 @@ class ModelArguments:
 
 def main():
     if len(sys.argv) != 2 or not sys.argv[1].endswith((".yaml", ".yml", ".json")):
-        raise SystemExit("detect_train is an internal runner slice; use train_hf_vision.py <config.yaml|json>.")
+        raise SystemExit(
+            "detect_train is an internal runner slice; invoke train_hf_vision.py <run-contract.yaml|json>."
+        )
     run_from_config(Path(os.path.abspath(sys.argv[1])))
 
 
-def run_from_config(config_path: Path) -> None:
-    start_time = time.time()
-
+def _parse_detect_config(
+    config_path: Path,
+) -> tuple[ModelArguments, DataTrainingArguments, TrainingArguments]:
     parser = HfArgumentParser(cast(Any, (ModelArguments, DataTrainingArguments, TrainingArguments)))
-
     if config_path.suffix.lower() in (".yaml", ".yml"):
-        model_args, data_args, training_args = parser.parse_yaml_file(
-            yaml_file=str(config_path), allow_extra_keys=True
-        )
-    elif config_path.suffix.lower() == ".json":
-        model_args, data_args, training_args = parser.parse_json_file(json_file=str(config_path))
-    else:
-        raise SystemExit("Config must be .yaml, .yml, or .json")
+        return parser.parse_yaml_file(yaml_file=str(config_path), allow_extra_keys=True)
+    if config_path.suffix.lower() == ".json":
+        return parser.parse_json_file(json_file=str(config_path))
+    raise SystemExit("Config must be .yaml, .yml, or .json")
+
+
+def run_from_config(config_path: Path) -> None:
+    run_detect_training(*_parse_detect_config(config_path))
+
+
+def run_detect_training(
+    model_args: ModelArguments,
+    data_args: DataTrainingArguments,
+    training_args: TrainingArguments,
+) -> None:
+    start_time = time.time()
 
     setup_hf_training_environment(training_args, logger=logger)
 
@@ -554,20 +580,36 @@ def run_from_config(config_path: Path) -> None:
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Load dataset
+    ld_kwargs: dict[str, Any] = {
+        "cache_dir": model_args.cache_dir,
+        "trust_remote_code": model_args.trust_remote_code,
+    }
+    if data_args.dataset_revision:
+        ld_kwargs["revision"] = data_args.dataset_revision
     dataset = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        trust_remote_code=model_args.trust_remote_code,
+        **ld_kwargs,
     )
 
+    img_src = data_args.image_column_name
+    obj_src = data_args.objects_column_name
+    for split_name in list(dataset.keys()):
+        d = dataset[split_name]
+        if img_src != "image" and img_src in d.column_names:
+            d = d.rename_column(img_src, "image")
+        if obj_src != "objects" and obj_src in d.column_names:
+            d = d.rename_column(obj_src, "objects")
+        dataset[split_name] = d
+
     # Bbox sanitization
-    bbox_format = detect_bbox_format_from_samples(dataset["train"])
+    bbox_format = detect_bbox_format_from_samples(dataset["train"], image_col="image", objects_col="objects")
     if bbox_format == "xyxy":
         logger.info("Converting bboxes from xyxy (Pascal VOC) -> xywh (COCO) format")
     for split_name in list(dataset.keys()):
-        dataset[split_name] = sanitize_dataset(dataset[split_name], bbox_format=bbox_format)
+        dataset[split_name] = sanitize_dataset(
+            dataset[split_name], bbox_format=bbox_format, image_col="image", objects_col="objects"
+        )
 
     for split_name in list(dataset.keys()):
         ds_split = dataset[split_name]

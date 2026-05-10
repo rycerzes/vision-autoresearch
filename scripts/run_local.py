@@ -20,6 +20,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from vision_lab.compile_launch_contract import compile_config_file_to_path
 from vision_lab.preflight_report import (
     build_preflight_report,
     print_preflight_report,
@@ -86,10 +87,16 @@ def main() -> int:
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Running {train_script.name} with {config_path.name}")
+    contract_path = (
+        ROOT / ".runtime" / "compiled-contracts" / f"{task}-{config_path.stem}-contract.yaml"
+    )
+    contract_path.parent.mkdir(parents=True, exist_ok=True)
+    compile_config_file_to_path(task_id=task, config_path=config_path, output_path=contract_path)
+
+    print(f"Running {train_script.name} with {contract_path.name} (compiled from {config_path.name})")
     print(f"Log: {log_path}")
 
-    argv = [sys.executable, str(train_script), str(config_path)]
+    argv = [sys.executable, str(train_script), str(contract_path)]
     start = time.time()
 
     with log_path.open("w", encoding="utf-8") as log_handle:

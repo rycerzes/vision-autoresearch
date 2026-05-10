@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -162,6 +164,22 @@ def encode_file(path: Path) -> str:
     )
 
 
+def encode_vision_lab_tree_b64() -> str:
+    """Zip ``scripts/vision_lab`` so HF Jobs workdir can run ``compile_launch_contract``."""
+    buf = io.BytesIO()
+    scripts_root = ROOT / "scripts"
+    base = scripts_root / "vision_lab"
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            if "__pycache__" in path.parts or path.suffix == ".pyc":
+                continue
+            arc = path.relative_to(scripts_root)
+            zf.write(path, arc.as_posix())
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def build_bundle_script(task: str, config_path: Path) -> str:
     """Build a self-contained script that HF Jobs can run via `uv run`."""
     train_script_path = ROOT / TASK_SCRIPTS[task]
@@ -169,6 +187,8 @@ def build_bundle_script(task: str, config_path: Path) -> str:
     config_payload = encode_file(config_path)
     config_name = config_path.name
     train_name = TASK_SCRIPTS[task]
+    vision_lab_zip_b64 = encode_vision_lab_tree_b64()
+    task_json = json.dumps(task)
 
     try:
         import tomllib
@@ -192,16 +212,20 @@ def build_bundle_script(task: str, config_path: Path) -> str:
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 TRAIN_PAYLOAD = "{train_payload}"
 CONFIG_PAYLOAD = "{config_payload}"
 TRAIN_NAME = "{train_name}"
 CONFIG_NAME = "{config_name}"
+VISION_LAB_ZIP = "{vision_lab_zip_b64}"
+TASK_ID = {task_json}
 
 
 def main() -> int:
@@ -213,15 +237,35 @@ def main() -> int:
     train_path.write_text(base64.b64decode(TRAIN_PAYLOAD).decode("utf-8"))
     config_path.write_text(base64.b64decode(CONFIG_PAYLOAD).decode("utf-8"))
 
+    deps = workdir / "_vision_lab_scripts"
+    deps.mkdir(parents=True, exist_ok=True)
+    zipfile.ZipFile(io.BytesIO(base64.b64decode(VISION_LAB_ZIP))).extractall(deps)
+
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(workdir)
+    env["PYTHONPATH"] = str(deps)
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
+    contract_path = workdir / "run_contract.resolved.yaml"
+    compile_rc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vision_lab.compile_launch_contract",
+            TASK_ID,
+            str(config_path),
+            str(contract_path),
+        ],
+        cwd=str(workdir),
+        env=env,
+    )
+    if compile_rc.returncode != 0:
+        return compile_rc.returncode
 
     log_path = workdir / "training.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_handle:
         proc = subprocess.Popen(
-            [sys.executable, str(train_path), str(config_path)],
+            [sys.executable, str(train_path), str(contract_path)],
             cwd=str(workdir),
             env=env,
             stdout=subprocess.PIPE,

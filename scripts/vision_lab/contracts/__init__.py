@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from vision_lab.contracts.loader import load_run_contract
 from vision_lab.contracts.run_contract import (
     CONTRACT_VERSION,
     ContractDataset,
@@ -34,6 +35,7 @@ __all__ = [
     "canonical_json_bytes",
     "contract_fingerprint",
     "contract_fingerprint_from_payload",
+    "load_run_contract",
     "parse_run_contract",
     "run_contract_from_mapping",
     "run_contract_to_primitive_dict",

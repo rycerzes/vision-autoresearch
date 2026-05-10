@@ -17,7 +17,7 @@ choices describe how a particular model family is trained.
 | Classify | `train_hf_vision.py` | `google/vit-base-patch16-224` | food101 | `accuracy` |
 | Detect | `train_hf_vision.py` | `ustc-community/dfine-small-coco` | cppe-5 | `mAP` |
 | Segment | `train_hf_vision.py` | `facebook/sam2.1-hiera-small` | — | `mIoU` |
-| Semantic segment | `train_hf_vision.py` | `nvidia/segformer-b0-finetuned-ade-512-512` | sidewalk-semantic | `mIoU` |
+| Semantic segment | `train_hf_vision.py` | `nvidia/segformer-b0-finetuned-ade-512-512` | nielsr/ade20k-demo | `mIoU` |
 | Instance segment | `train_hf_vision.py` | `facebook/mask2former-swin-tiny-coco-instance` | — | `mask_map` |
 | Universal segment | `train_hf_vision.py` | `facebook/mask2former-swin-tiny-coco-panoptic` | — | `pq` |
 

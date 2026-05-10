@@ -61,6 +61,8 @@ def parse_eval_metrics(text: str) -> list[dict[str, Any]]:
         if match:
             row: dict[str, Any] = {"eval_loss": float(match.group("loss"))}
             for key in (
+                "eval_map",
+                "eval_map_50",
                 "eval_mAP",
                 "eval_mAP_50",
                 "eval_accuracy",

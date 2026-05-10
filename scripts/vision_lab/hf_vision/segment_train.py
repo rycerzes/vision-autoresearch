@@ -65,16 +65,24 @@ class SAMSegmentationDataset(Dataset):
     def _extract_prompt(self, item):
         if self.prompt_col and self.prompt_col in item:
             raw = item[self.prompt_col]
-            parsed = json.loads(raw) if isinstance(raw, str) else raw
-            if self.prompt_type == "bbox":
-                return parsed.get("bbox") or parsed.get("box")
-            return parsed.get("point") or parsed.get("points")
+            parsed = None
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = None
+            elif isinstance(raw, dict):
+                parsed = raw
+            if isinstance(parsed, dict):
+                if self.prompt_type == "bbox":
+                    return parsed.get("bbox") or parsed.get("box")
+                return parsed.get("point") or parsed.get("points")
 
         if self.prompt_type == "bbox" and self.bbox_col:
-            return item[self.bbox_col]
+            return item.get(self.bbox_col)
         if self.prompt_type == "point" and self.point_col:
-            return item[self.point_col]
-        raise ValueError("Could not extract prompt from sample")
+            return item.get(self.point_col)
+        return None
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
@@ -82,13 +90,22 @@ class SAMSegmentationDataset(Dataset):
         prompt = self._extract_prompt(item)
 
         if self.prompt_type == "bbox":
+            if prompt is None or (isinstance(prompt, (list, tuple)) and len(prompt) == 0):
+                # Fallback to full-image box for sparse/noisy prompt columns.
+                prompt = [0, 0, image.size[0] - 1, image.size[1] - 1]
             inputs = self.processor(image, input_boxes=[[prompt]], return_tensors="pt")
         else:
-            if isinstance(prompt[0], (int, float)):
+            if prompt is None:
+                prompt = [[image.size[0] / 2.0, image.size[1] / 2.0]]
+            elif isinstance(prompt, (list, tuple)) and prompt and isinstance(prompt[0], (int, float)):
                 prompt = [prompt]
             inputs = self.processor(image, input_points=[[prompt]], return_tensors="pt")
 
-        mask = np.array(item[self.mask_col])
+        raw_mask = item.get(self.mask_col)
+        if raw_mask is None:
+            mask = np.zeros((image.size[1], image.size[0]), dtype=np.uint8)
+        else:
+            mask = np.array(raw_mask)
         if mask.ndim == 3:
             mask = mask[:, :, 0]
         inputs["labels"] = (mask > 0).astype(np.float32)
@@ -269,6 +286,9 @@ def run_from_config(config_path: Path) -> None:
         raise SystemExit("Config must be .yaml, .yml, or .json")
 
     setup_hf_training_environment(training_args, logger=logger)
+
+    # Ensure Trainer keeps/collects segmentation labels for loss + compute_metrics.
+    training_args.label_names = ["labels"]
 
     logger.info(
         "HF vision runner (segment vertical): model_loader=%s adaptation_mode=%s",

@@ -93,6 +93,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
         promotion_metrics=_m("mAP", "mAP_50"),
+        allowed_auxiliary_summary_keys=_m("mAR"),
     ),
     _task(
         id="classify",
@@ -148,6 +149,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
         promotion_metrics=_m("mAP", "mAP_50"),
+        allowed_auxiliary_summary_keys=_m("mAR"),
     ),
     _task(
         id="track_yolo",
@@ -157,6 +159,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
         promotion_metrics=_m("mAP", "mAP_50"),
+        allowed_auxiliary_summary_keys=_m("mAR"),
     ),
     _task(
         id="segment_yolo",
@@ -184,6 +187,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
         promotion_metrics=_m("mAP", "mAP_50"),
+        allowed_auxiliary_summary_keys=_m("mAR"),
     ),
     _task(
         id="obb_yolo",
@@ -193,6 +197,7 @@ _TASKS: tuple[TaskSpec, ...] = (
         primary_metric="mAP",
         metric_direction=MetricDirection.HIGHER,
         promotion_metrics=_m("mAP", "mAP_50"),
+        allowed_auxiliary_summary_keys=_m("mAR"),
     ),
 )
 

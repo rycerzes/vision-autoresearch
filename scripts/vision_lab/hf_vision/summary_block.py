@@ -27,8 +27,8 @@ def print_vision_autoresearch_summary(
             print(f"dice: {eval_metrics.get('eval_dice', eval_metrics.get('dice', 0.0))}")
     elif task_type == "instance_segment":
         print(f"mask_map: {eval_metrics.get('eval_mask_map', eval_metrics.get('mask_map', 0.0))}")
-        print(f"mAP: {eval_metrics.get('eval_mAP', eval_metrics.get('mAP', 0.0))}")
-        print(f"mAP_50: {eval_metrics.get('eval_mAP_50', eval_metrics.get('mAP_50', 0.0))}")
+        print(f"mAP: {eval_metrics.get('eval_map', eval_metrics.get('eval_mAP', eval_metrics.get('mAP', 0.0)))}")
+        print(f"mAP_50: {eval_metrics.get('eval_map_50', eval_metrics.get('eval_mAP_50', eval_metrics.get('mAP_50', 0.0)))}")
     elif task_type == "universal_segment":
         print(f"pq: {eval_metrics.get('eval_pq', eval_metrics.get('pq', 0.0))}")
         print(f"sq: {eval_metrics.get('eval_sq', eval_metrics.get('sq', 0.0))}")

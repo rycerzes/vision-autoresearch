@@ -41,14 +41,17 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from vision_lab.hf_vision import apply_adaptation_mode, build_transforms, load_hf_vision_model
-from vision_lab.hf_vision.detect_train import run_from_config as _run_detect_from_config
 from vision_lab.hf_vision.constants import (
     ADAPTATION_MODE_CHOICES,
     HF_VISION_SUPPORTED_TASKS,
     MODEL_LOADER_CHOICES,
     ROUTED_TASK_IDS,
 )
-from vision_lab.hf_vision.runner_session import finish_trackio_session, setup_hf_training_environment
+from vision_lab.hf_vision.detect_train import run_from_config as _run_detect_from_config
+from vision_lab.hf_vision.runner_session import (
+    finish_trackio_session,
+    setup_hf_training_environment,
+)
 from vision_lab.hf_vision.segment_train import run_from_config as _run_segment_from_config
 from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
@@ -119,18 +122,28 @@ class DataArguments:
         default=0.15,
         metadata={"help": "Fraction held out from train when no validation split exists."},
     )
-    max_train_samples: int | None = field(default=None, metadata={"help": "Cap train rows (debug)."})
+    max_train_samples: int | None = field(
+        default=None, metadata={"help": "Cap train rows (debug)."}
+    )
     max_eval_samples: int | None = field(default=None, metadata={"help": "Cap eval rows (debug)."})
     image_column_name: str = field(default="image", metadata={"help": "Image column."})
     label_column_name: str = field(default="label", metadata={"help": "Label column."})
     mask_column_name: str = field(default="mask", metadata={"help": "Segmentation mask column."})
     annotation_column_name: str = field(
         default="annotation",
-        metadata={"help": "Instance/panoptic annotation column containing semantic and instance ids."},
+        metadata={
+            "help": "Instance/panoptic annotation column containing semantic and instance ids."
+        },
     )
-    image_height: int | None = field(default=512, metadata={"help": "Dense segmentation image height."})
-    image_width: int | None = field(default=512, metadata={"help": "Dense segmentation image width."})
-    do_reduce_labels: bool = field(default=False, metadata={"help": "Reduce background label 0 when supported."})
+    image_height: int | None = field(
+        default=512, metadata={"help": "Dense segmentation image height."}
+    )
+    image_width: int | None = field(
+        default=512, metadata={"help": "Dense segmentation image width."}
+    )
+    do_reduce_labels: bool = field(
+        default=False, metadata={"help": "Reduce background label 0 when supported."}
+    )
 
 
 @dataclass
@@ -139,11 +152,7 @@ class AdaptationArguments:
 
     adaptation_mode: str = field(
         default="full_finetune",
-        metadata={
-            "help": "One of: "
-            + ", ".join(sorted(ADAPTATION_MODE_CHOICES))
-            + "."
-        },
+        metadata={"help": "One of: " + ", ".join(sorted(ADAPTATION_MODE_CHOICES)) + "."},
     )
 
 
@@ -206,7 +215,9 @@ def main() -> None:
 
     ml = model_args.model_loader.strip()
     if ml not in MODEL_LOADER_CHOICES:
-        raise SystemExit(f"Invalid model_loader={model_args.model_loader!r}; expected {sorted(MODEL_LOADER_CHOICES)}.")
+        raise SystemExit(
+            f"Invalid model_loader={model_args.model_loader!r}; expected {sorted(MODEL_LOADER_CHOICES)}."
+        )
 
     if task_args.task_type not in HF_VISION_SUPPORTED_TASKS:
         raise SystemExit(
@@ -250,7 +261,11 @@ def _run_classify(
 
     label_col = data_args.label_column_name
     if label_col not in dataset["train"].column_names:
-        candidates = [c for c in dataset["train"].column_names if c in ("label", "labels", "class", "fine_label")]
+        candidates = [
+            c
+            for c in dataset["train"].column_names
+            if c in ("label", "labels", "class", "fine_label")
+        ]
         if candidates:
             label_col = candidates[0]
             logger.info("Label column %r missing; using %r", data_args.label_column_name, label_col)
@@ -371,7 +386,9 @@ def _run_classify(
         if adaptation_mode in ("feature_extract_eval", "zero_shot_eval"):
             logger.warning("do_train=True with eval-only adaptation; skipping trainer.train().")
         else:
-            train_result = trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
+            train_result = trainer.train(
+                resume_from_checkpoint=training_args.resume_from_checkpoint
+            )
             trainer.save_model()
             train_metrics = train_result.metrics
             trainer.log_metrics("train", train_metrics)
@@ -431,7 +448,9 @@ def _run_semantic_segment_from_config(config_path: Path) -> None:
         raise SystemExit("Config must be .yaml, .yml, or .json")
 
     if str(task_args.task_type).strip() != "semantic_segment":
-        raise SystemExit(f"Expected task_type=semantic_segment in config, got {task_args.task_type!r}")
+        raise SystemExit(
+            f"Expected task_type=semantic_segment in config, got {task_args.task_type!r}"
+        )
 
     setup_hf_training_environment(training_args, logger=logger)
     logger.info(
@@ -459,17 +478,29 @@ def _mask_to_array(mask: Any) -> np.ndarray:
     return arr.astype(np.int64)
 
 
-def _discover_semantic_labels(dataset: Any, mask_col: str, max_samples: int = 200) -> tuple[dict[int, str], dict[str, int]]:
-    unique: set[int] = set()
+def _discover_semantic_labels(
+    dataset: Any,
+    mask_col: str,
+    max_samples: int = 200,
+) -> tuple[dict[int, str], dict[str, int], dict[int, int]]:
+    """Discover class ids and build a contiguous id space for training loss.
+
+    Many Hub semantic datasets use sparse/raw ids (e.g. ADE20K-like ids up to 150).
+    Segmentation heads are initialized with ``num_labels=len(classes)``, so labels
+    must be remapped to ``0..num_labels-1`` before loss computation.
+    """
+    unique_raw: set[int] = set()
     for idx in range(min(max_samples, len(dataset["train"]))):
         mask = _mask_to_array(dataset["train"][idx][mask_col])
-        unique.update(int(v) for v in np.unique(mask) if int(v) >= 0)
-    if not unique:
+        unique_raw.update(int(v) for v in np.unique(mask) if int(v) >= 0 and int(v) != 255)
+    if not unique_raw:
         raise ValueError(f"No non-negative class ids found in mask column {mask_col!r}.")
-    ids = sorted(unique)
-    id2label = {i: f"class_{i}" for i in ids}
+
+    raw_ids = sorted(unique_raw)
+    raw_to_contiguous = {raw_id: i for i, raw_id in enumerate(raw_ids)}
+    id2label = {i: f"class_{raw_id}" for i, raw_id in enumerate(raw_ids)}
     label2id = {v: k for k, v in id2label.items()}
-    return id2label, label2id
+    return id2label, label2id, raw_to_contiguous
 
 
 def _run_semantic_segment(
@@ -480,6 +511,10 @@ def _run_semantic_segment(
     training_args: TrainingArguments,
     start_time: float,
 ) -> None:
+    # Keep raw dataset columns (e.g. image/mask) for with_transform() preprocessing.
+    # Otherwise Trainer prunes columns before transform and dataloader workers hit KeyError.
+    training_args.remove_unused_columns = False
+
     dataset = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
@@ -490,7 +525,9 @@ def _run_semantic_segment(
         raise ValueError(f"No 'train' split found. Available: {list(dataset.keys())}")
     if "validation" not in dataset and "test" not in dataset:
         dataset["train"] = dataset["train"].shuffle(seed=training_args.seed)
-        split = dataset["train"].train_test_split(data_args.train_val_split or 0.15, seed=training_args.seed)
+        split = dataset["train"].train_test_split(
+            data_args.train_val_split or 0.15, seed=training_args.seed
+        )
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
 
@@ -499,7 +536,14 @@ def _run_semantic_segment(
     if mask_col not in dataset["train"].column_names:
         candidates = [
             c
-            for c in ("mask", "label", "annotation", "segmentation_mask", "semantic_mask", "label_map")
+            for c in (
+                "mask",
+                "label",
+                "annotation",
+                "segmentation_mask",
+                "semantic_mask",
+                "label_map",
+            )
             if c in dataset["train"].column_names
         ]
         if candidates:
@@ -511,7 +555,7 @@ def _run_semantic_segment(
                 f"Available: {dataset['train'].column_names}"
             )
 
-    id2label, label2id = _discover_semantic_labels(dataset, mask_col)
+    id2label, label2id, raw_to_contiguous = _discover_semantic_labels(dataset, mask_col)
     logger.info("Discovered semantic classes: %s", id2label)
 
     if data_args.max_train_samples is not None:
@@ -547,13 +591,22 @@ def _run_semantic_segment(
         target_size = tuple(encoded["pixel_values"].shape[-2:])
         labels = []
         for raw_mask in examples[mask_col]:
-            mask = torch.as_tensor(_mask_to_array(raw_mask), dtype=torch.long)
+            raw = _mask_to_array(raw_mask).astype(np.int64)
+            remapped = np.full(raw.shape, 255, dtype=np.int64)
+            for raw_id, contiguous_id in raw_to_contiguous.items():
+                remapped[raw == raw_id] = contiguous_id
+            mask = torch.as_tensor(remapped, dtype=torch.long)
             if tuple(mask.shape[-2:]) != target_size:
-                mask = F.interpolate(
-                    mask.unsqueeze(0).unsqueeze(0).float(),
-                    size=target_size,
-                    mode="nearest",
-                ).squeeze(0).squeeze(0).long()
+                mask = (
+                    F.interpolate(
+                        mask.unsqueeze(0).unsqueeze(0).float(),
+                        size=target_size,
+                        mode="nearest",
+                    )
+                    .squeeze(0)
+                    .squeeze(0)
+                    .long()
+                )
             labels.append(mask)
         encoded["labels"] = torch.stack(labels)
         return encoded
@@ -562,7 +615,11 @@ def _run_semantic_segment(
     dataset[eval_key] = dataset[eval_key].with_transform(transform_batch)
 
     def compute_metrics(eval_pred: EvalPrediction) -> dict[str, float]:
-        logits = eval_pred.predictions[0] if isinstance(eval_pred.predictions, tuple) else eval_pred.predictions
+        logits = (
+            eval_pred.predictions[0]
+            if isinstance(eval_pred.predictions, tuple)
+            else eval_pred.predictions
+        )
         preds = np.argmax(logits, axis=1)
         labels = np.asarray(eval_pred.label_ids)
         if preds.shape[-2:] != labels.shape[-2:]:
@@ -599,7 +656,9 @@ def _run_semantic_segment(
         if adaptation_mode in ("feature_extract_eval", "zero_shot_eval"):
             logger.warning("do_train=True with eval-only adaptation; skipping trainer.train().")
         else:
-            train_result = trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
+            train_result = trainer.train(
+                resume_from_checkpoint=training_args.resume_from_checkpoint
+            )
             trainer.save_model()
             train_metrics = train_result.metrics
             trainer.log_metrics("train", train_metrics)
@@ -616,7 +675,9 @@ def _run_semantic_segment(
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1e6 if torch.cuda.is_available() else 0.0
 
     finish_trackio_session()
-    print_vision_autoresearch_summary(task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb)
+    print_vision_autoresearch_summary(
+        task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb
+    )
 
     kwargs = {
         "finetuned_from": model_args.model_name_or_path,
@@ -670,22 +731,33 @@ def _semantic_instance_pair(annotation: Any) -> np.ndarray:
     )
 
 
-def _dense_label_maps(dataset: Any, annotation_col: str, max_samples: int = 200) -> tuple[dict[int, str], dict[str, int]]:
+def _dense_label_maps(
+    dataset: Any,
+    annotation_col: str,
+    max_samples: int = 200,
+) -> tuple[dict[int, str], dict[str, int], dict[int, int]]:
     first = dataset["train"][0]
     mapping = first.get("semantic_class_to_id")
     if isinstance(mapping, dict) and mapping:
-        label2id = {str(k): int(v) for k, v in mapping.items()}
-        return {v: k for k, v in label2id.items()}, label2id
+        raw_label2id = {str(k): int(v) for k, v in mapping.items()}
+        raw_ids = sorted(set(raw_label2id.values()))  # type: ignore
+        raw_to_contiguous = {raw_id: i for i, raw_id in enumerate(raw_ids)}
+        id2label = {i: f"class_{raw_id}" for i, raw_id in enumerate(raw_ids)}
+        label2id = {v: k for k, v in id2label.items()}
+        return id2label, label2id, raw_to_contiguous
 
-    ids: set[int] = set()
+    raw_ids: set[int] = set()
     for idx in range(min(max_samples, len(dataset["train"]))):
         ann = _semantic_instance_pair(dataset["train"][idx][annotation_col])
-        ids.update(int(v) for v in np.unique(ann[..., 0]) if int(v) >= 0)
-    if not ids:
+        raw_ids.update(int(v) for v in np.unique(ann[..., 0]) if int(v) >= 0 and int(v) != 255)
+    if not raw_ids:
         raise ValueError(f"No semantic class ids found in annotation column {annotation_col!r}.")
-    id2label = {i: f"class_{i}" for i in sorted(ids)}
+
+    sorted_raw = sorted(raw_ids)
+    raw_to_contiguous = {raw_id: i for i, raw_id in enumerate(sorted_raw)}
+    id2label = {i: f"class_{raw_id}" for i, raw_id in enumerate(sorted_raw)}
     label2id = {v: k for k, v in id2label.items()}
-    return id2label, label2id
+    return id2label, label2id, raw_to_contiguous
 
 
 def _augment_dense_batch(
@@ -695,6 +767,7 @@ def _augment_dense_batch(
     image_processor: Any,
     image_col: str,
     annotation_col: str,
+    semantic_id_remap: Mapping[int, int] | None = None,
 ) -> dict[str, Any]:
     batch: dict[str, Any] = {
         "pixel_values": [],
@@ -709,11 +782,17 @@ def _augment_dense_batch(
         aug_pair = output["mask"]
         instance_mask = aug_pair[..., 1]
         pairs = np.unique(aug_pair.reshape(-1, 2), axis=0)
-        instance_id_to_semantic_id = {
-            int(instance_id): int(semantic_id)
-            for semantic_id, instance_id in pairs
-            if int(instance_id) >= 0 and int(semantic_id) >= 0
-        }
+        instance_id_to_semantic_id = {}
+        for semantic_id, instance_id in pairs:
+            sid = int(semantic_id)
+            iid = int(instance_id)
+            if iid < 0 or sid < 0:
+                continue
+            if semantic_id_remap is not None:
+                if sid not in semantic_id_remap:
+                    continue
+                sid = int(semantic_id_remap[sid])
+            instance_id_to_semantic_id[iid] = sid
         model_inputs = image_processor(
             images=[aug_image],
             segmentation_maps=[instance_mask],
@@ -729,7 +808,9 @@ def _augment_dense_batch(
 
 
 class InstanceSegmentationEvaluator:
-    def __init__(self, image_processor: Any, id2label: Mapping[int, str], threshold: float = 0.0) -> None:
+    def __init__(
+        self, image_processor: Any, id2label: Mapping[int, str], threshold: float = 0.0
+    ) -> None:
         self.image_processor = image_processor
         self.id2label = id2label
         self.threshold = threshold
@@ -754,6 +835,21 @@ class InstanceSegmentationEvaluator:
             class_queries_logits=torch.as_tensor(prediction_batch[0]),
             masks_queries_logits=torch.as_tensor(prediction_batch[1]),
         )
+        batch_size = int(model_output.class_queries_logits.shape[0])
+        if len(target_sizes) != batch_size:
+            logger.warning(
+                "Instance eval size mismatch: %d targets for %d predictions; adjusting target_sizes.",
+                len(target_sizes),
+                batch_size,
+            )
+            if not target_sizes:
+                h, w = model_output.masks_queries_logits.shape[-2:]
+                target_sizes = [(int(h), int(w)) for _ in range(batch_size)]
+            elif len(target_sizes) < batch_size:
+                target_sizes = target_sizes + [target_sizes[-1]] * (batch_size - len(target_sizes))
+            else:
+                target_sizes = target_sizes[:batch_size]
+
         post_processed = self.image_processor.post_process_instance_segmentation(
             model_output,
             threshold=self.threshold,
@@ -766,7 +862,9 @@ class InstanceSegmentationEvaluator:
                 predictions.append(
                     {
                         "masks": image_pred["segmentation"].to(dtype=torch.bool),
-                        "labels": torch.tensor([x["label_id"] for x in image_pred["segments_info"]]),
+                        "labels": torch.tensor(
+                            [x["label_id"] for x in image_pred["segments_info"]]
+                        ),
                         "scores": torch.tensor([x["score"] for x in image_pred["segments_info"]]),
                     }
                 )
@@ -787,6 +885,19 @@ class InstanceSegmentationEvaluator:
         targets = self._targets(target_batch)
         target_sizes = [(int(t["masks"].shape[-2]), int(t["masks"].shape[-1])) for t in targets]
         predictions = self._predictions(prediction_batch, target_sizes)
+        if len(predictions) != len(targets):
+            logger.warning(
+                "Instance eval count mismatch: %d predictions vs %d targets; trimming to overlap.",
+                len(predictions),
+                len(targets),
+            )
+            n = min(len(predictions), len(targets))
+            predictions = predictions[:n]
+            targets = targets[:n]
+        if not predictions or not targets:
+            self.metric.reset()
+            return {"mask_map": 0.0, "mAP": 0.0, "mAP_50": 0.0}
+
         self.metric.update(predictions, targets)
         metrics = self.metric.compute()
         self.metric.reset()
@@ -803,7 +914,9 @@ class PanopticSegmentationEvaluator:
         self.threshold = threshold
 
     @staticmethod
-    def _match_quality(pred_masks: torch.Tensor, target_masks: torch.Tensor) -> tuple[float, float, float]:
+    def _match_quality(
+        pred_masks: torch.Tensor, target_masks: torch.Tensor
+    ) -> tuple[float, float, float]:
         if pred_masks.numel() == 0 and target_masks.numel() == 0:
             return 1.0, 1.0, 1.0
         if pred_masks.numel() == 0 or target_masks.numel() == 0:
@@ -853,6 +966,20 @@ class PanopticSegmentationEvaluator:
             class_queries_logits=torch.as_tensor(prediction_batch[0]),
             masks_queries_logits=torch.as_tensor(prediction_batch[1]),
         )
+        batch_size = int(model_output.class_queries_logits.shape[0])
+        if len(target_sizes) != batch_size:
+            logger.warning(
+                "Panoptic eval size mismatch: %d targets for %d predictions; adjusting target_sizes.",
+                len(target_sizes),
+                batch_size,
+            )
+            if not target_sizes:
+                h, w = model_output.masks_queries_logits.shape[-2:]
+                target_sizes = [(int(h), int(w)) for _ in range(batch_size)]
+            elif len(target_sizes) < batch_size:
+                target_sizes = target_sizes + [target_sizes[-1]] * (batch_size - len(target_sizes))
+            else:
+                target_sizes = target_sizes[:batch_size]
         if hasattr(self.image_processor, "post_process_panoptic_segmentation"):
             post_processed = self.image_processor.post_process_panoptic_segmentation(
                 model_output,
@@ -944,7 +1071,9 @@ def _run_dense_instance_or_universal(
         raise ValueError(f"No 'train' split found. Available: {list(dataset.keys())}")
     if "validation" not in dataset and "test" not in dataset:
         dataset["train"] = dataset["train"].shuffle(seed=training_args.seed)
-        split = dataset["train"].train_test_split(data_args.train_val_split or 0.15, seed=training_args.seed)
+        split = dataset["train"].train_test_split(
+            data_args.train_val_split or 0.15, seed=training_args.seed
+        )
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
 
@@ -953,19 +1082,30 @@ def _run_dense_instance_or_universal(
     if annotation_col not in dataset["train"].column_names:
         candidates = [
             c
-            for c in ("annotation", "panoptic_mask", "panoptic_masks", "segmentation", "mask", "label")
+            for c in (
+                "annotation",
+                "panoptic_mask",
+                "panoptic_masks",
+                "segmentation",
+                "mask",
+                "label",
+            )
             if c in dataset["train"].column_names
         ]
         if candidates:
             annotation_col = candidates[0]
-            logger.info("Annotation column %r missing; using %r", data_args.annotation_column_name, annotation_col)
+            logger.info(
+                "Annotation column %r missing; using %r",
+                data_args.annotation_column_name,
+                annotation_col,
+            )
         else:
             raise ValueError(
                 f"Annotation column {data_args.annotation_column_name!r} not found. "
                 f"Available: {dataset['train'].column_names}"
             )
 
-    id2label, label2id = _dense_label_maps(dataset, annotation_col)
+    id2label, label2id, raw_to_contiguous = _dense_label_maps(dataset, annotation_col)
     model, image_processor = load_hf_vision_model(
         task_type=task_type,
         model_loader=model_args.model_loader,
@@ -990,10 +1130,14 @@ def _run_dense_instance_or_universal(
     apply_adaptation_mode(model, adaptation_mode, architecture="semantic_segment")
 
     if data_args.max_train_samples is not None:
-        dataset["train"] = dataset["train"].select(range(min(data_args.max_train_samples, len(dataset["train"]))))
+        dataset["train"] = dataset["train"].select(
+            range(min(data_args.max_train_samples, len(dataset["train"])))
+        )
     eval_key = "validation" if "validation" in dataset else "test"
     if data_args.max_eval_samples is not None:
-        dataset[eval_key] = dataset[eval_key].select(range(min(data_args.max_eval_samples, len(dataset[eval_key]))))
+        dataset[eval_key] = dataset[eval_key].select(
+            range(min(data_args.max_eval_samples, len(dataset[eval_key])))
+        )
 
     train_transform = A.Compose([A.HorizontalFlip(p=0.5), A.RandomBrightnessContrast(p=0.5)])
     val_transform = A.Compose([A.NoOp()])
@@ -1003,6 +1147,7 @@ def _run_dense_instance_or_universal(
         image_processor=image_processor,
         image_col=image_col,
         annotation_col=annotation_col,
+        semantic_id_remap=raw_to_contiguous,
     )
     val_transform_batch = partial(
         _augment_dense_batch,
@@ -1010,12 +1155,15 @@ def _run_dense_instance_or_universal(
         image_processor=image_processor,
         image_col=image_col,
         annotation_col=annotation_col,
+        semantic_id_remap=raw_to_contiguous,
     )
     dataset["train"] = dataset["train"].with_transform(train_transform_batch)
     dataset[eval_key] = dataset[eval_key].with_transform(val_transform_batch)
 
     if task_type == "instance_segment":
-        compute_metrics = InstanceSegmentationEvaluator(image_processor=image_processor, id2label=id2label)
+        compute_metrics = InstanceSegmentationEvaluator(
+            image_processor=image_processor, id2label=id2label
+        )
     else:
         compute_metrics = PanopticSegmentationEvaluator(image_processor=image_processor)
 
@@ -1047,7 +1195,9 @@ def _run_dense_instance_or_universal(
     training_seconds = time.time() - start_time
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1e6 if torch.cuda.is_available() else 0.0
     finish_trackio_session()
-    print_vision_autoresearch_summary(task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb)
+    print_vision_autoresearch_summary(
+        task_type, eval_metrics, train_metrics, training_seconds, peak_vram_mb
+    )
 
     kwargs = {
         "finetuned_from": model_args.model_name_or_path,

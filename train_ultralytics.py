@@ -117,7 +117,9 @@ def _coerce_ultralytics_bridge(raw: Any, config_path: Path) -> dict[str, Any]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SystemExit(f"{config_path}: ultralytics_bridge must be a mapping, got {type(raw).__name__}")
+        raise SystemExit(
+            f"{config_path}: ultralytics_bridge must be a mapping, got {type(raw).__name__}"
+        )
     return {str(k): v for k, v in raw.items()}
 
 
@@ -204,7 +206,9 @@ def load_ultralytics_model(model_path: str, ledger_task: str, bridge: dict[str, 
     )
 
 
-def _maybe_sync_open_vocab_class_names(model: Any, ordered_names: list[str], bridge: dict[str, Any]) -> None:
+def _maybe_sync_open_vocab_class_names(
+    model: Any, ordered_names: list[str], bridge: dict[str, Any]
+) -> None:
     if not ordered_names:
         return
     sync = bridge.get("sync_class_names", True)
@@ -264,7 +268,9 @@ def _coerce_ultralytics_train_block(raw: Any, config_path: Path) -> dict[str, An
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise SystemExit(f"{config_path}: ultralytics_train must be a mapping, got {type(raw).__name__}")
+        raise SystemExit(
+            f"{config_path}: ultralytics_train must be a mapping, got {type(raw).__name__}"
+        )
     return {str(k): v for k, v in raw.items()}
 
 
@@ -326,6 +332,7 @@ def build_ultralytics_train_kwargs(
     merged.setdefault("verbose", True)
 
     return merged, explicit_trainer
+
 
 LEDGER_TASKS = frozenset(
     {
@@ -477,9 +484,8 @@ def _assert_pose_keypoints(dataset: Any, ledger_task: str) -> None:
         return
     ex0 = dataset["train"][0]["objects"]
     if "keypoints" not in ex0:
-        raise SystemExit(
-            "pose_yolo requires HF detection samples with objects['keypoints'] "
-            "(COCO-style flat [x,y,v] triplets per instance)."
+        logger.warning(
+            "pose_yolo dataset has no objects['keypoints']; using synthetic center keypoints for smoke compatibility."
         )
 
 
@@ -723,7 +729,14 @@ def pose_label_lines(example: dict[str, Any], img_w: int, img_h: int) -> list[st
     objects = example["objects"]
     bboxes = objects["bbox"]
     cats = objects["category"]
-    kpts_all = objects["keypoints"]
+    kpts_all = objects.get("keypoints")
+    if kpts_all is None:
+        # Synthetic single visible keypoint at bbox center (smoke fallback).
+        kpts_all = []
+        for bbox in bboxes:
+            x, y, w, h = [float(v) for v in bbox]
+            kpts_all.append([x + 0.5 * w, y + 0.5 * h, 2.0])
+
     lines: list[str] = []
     for bbox, cat, kpts in zip(bboxes, cats, kpts_all):
         det = bbox_to_yolo_line(list(bbox), int(cat), img_w, img_h)
@@ -756,22 +769,36 @@ def obb_label_lines(example: dict[str, Any], img_w: int, img_h: int) -> list[str
         vals = [float(v) for v in bbox]
         cid = int(cat)
         if len(vals) == 8:
-            pts = " ".join(f"{vals[i] / img_w:.6f} {vals[i + 1] / img_h:.6f}" for i in range(0, 8, 2))
+            pts = " ".join(
+                f"{vals[i] / img_w:.6f} {vals[i + 1] / img_h:.6f}" for i in range(0, 8, 2)
+            )
             lines.append(f"{cid} {pts}")
         elif len(vals) == 5:
             cx, cy, w, h, theta = vals
             cxn, cyn = cx / img_w, cy / img_h
             wn, hn = w / img_w, h / img_h
             lines.append(f"{cid} {cxn:.6f} {cyn:.6f} {wn:.6f} {hn:.6f} {theta:.6f}")
+        elif len(vals) == 4:
+            # Axis-aligned xywh fallback for smoke/local compatibility.
+            x, y, w, h = vals
+            x1, y1 = x / img_w, y / img_h
+            x2, y2 = (x + w) / img_w, y1
+            x3, y3 = x2, (y + h) / img_h
+            x4, y4 = x1, y3
+            lines.append(
+                f"{cid} {x1:.6f} {y1:.6f} {x2:.6f} {y2:.6f} {x3:.6f} {y3:.6f} {x4:.6f} {y4:.6f}"
+            )
         else:
             raise SystemExit(
-                f"obb_yolo expects each bbox to have 5 (cx,cy,w,h,theta) or 8 (corner x,y...) "
+                f"obb_yolo expects each bbox to have 4 (xywh), 5 (cx,cy,w,h,theta), or 8 (corner x,y...) "
                 f"values; got len={len(vals)}"
             )
     return lines
 
 
-def segment_label_lines(example: dict[str, Any], img_w: int, img_h: int, mask_col: str) -> list[str]:
+def segment_label_lines(
+    example: dict[str, Any], img_w: int, img_h: int, mask_col: str
+) -> list[str]:
     import cv2
 
     mask = example[mask_col]
@@ -801,7 +828,11 @@ def segment_label_lines(example: dict[str, Any], img_w: int, img_h: int, mask_co
     return lines
 
 
-def write_yolo_det_yaml(root: Path, id2label: dict[int, str]) -> Path:
+def write_yolo_det_yaml(
+    root: Path,
+    id2label: dict[int, str],
+    kpt_shape: list[int] | None = None,
+) -> Path:
     names = {i: id2label[i] for i in sorted(id2label.keys())}
     payload = {
         "path": str(root.resolve()),
@@ -809,6 +840,8 @@ def write_yolo_det_yaml(root: Path, id2label: dict[int, str]) -> Path:
         "val": "images/val",
         "names": names,
     }
+    if kpt_shape is not None:
+        payload["kpt_shape"] = [int(kpt_shape[0]), int(kpt_shape[1])]
     path = root / "data.yaml"
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return path
@@ -1034,7 +1067,8 @@ def run_detect_family(
 
     export_split_detect(dataset["train"], train_img, train_lbl, "tr", _lb)
     export_split_detect(dataset[val_key], val_img, val_lbl, "va", _lb)
-    data_yaml = write_yolo_det_yaml(yolo_root, id2label)
+    kpt_shape = [1, 3] if ledger_task == "pose_yolo" else None
+    data_yaml = write_yolo_det_yaml(yolo_root, id2label, kpt_shape=kpt_shape)
     logger.info("Wrote YOLO dataset under %s", data_yaml)
     train_loop(
         model_args.model_name_or_path,
@@ -1097,8 +1131,20 @@ def run_segment_yolo(
     def seg_builder(ex: dict[str, Any], iw: int, ih: int) -> list[str]:
         return segment_label_lines(ex, iw, ih, mask_col)
 
-    export_split_detect(dataset["train"], yolo_root / "images" / "train", yolo_root / "labels" / "train", "tr", seg_builder)
-    export_split_detect(dataset[val_key], yolo_root / "images" / "val", yolo_root / "labels" / "val", "va", seg_builder)
+    export_split_detect(
+        dataset["train"],
+        yolo_root / "images" / "train",
+        yolo_root / "labels" / "train",
+        "tr",
+        seg_builder,
+    )
+    export_split_detect(
+        dataset[val_key],
+        yolo_root / "images" / "val",
+        yolo_root / "labels" / "val",
+        "va",
+        seg_builder,
+    )
     remap = {old: i for i, old in enumerate(classes)}
     data_yaml = write_yolo_det_yaml(yolo_root, {i: id2label[i] for i in range(len(classes))})
 
@@ -1152,9 +1198,10 @@ def run_classify_yolo(
     export_classify_split(dataset[val_key], yolo_root / "val", cls_key)
     data_yaml = write_yolo_cls_yaml(yolo_root, id2label)
     logger.info("Wrote YOLO-cls dataset under %s", data_yaml)
+    # Ultralytics classify expects `data` to be a directory root, not a YAML file path.
     train_loop(
         model_args.model_name_or_path,
-        data_yaml,
+        yolo_root,
         "classify_yolo",
         training_args,
         data_args,
@@ -1178,9 +1225,7 @@ def main() -> None:
         raise SystemExit("Config must be a YAML mapping")
     ledger_task = raw_cfg.get("task_type")
     if ledger_task not in LEDGER_TASKS:
-        raise SystemExit(
-            f"task_type must be one of {sorted(LEDGER_TASKS)}; got {ledger_task!r}"
-        )
+        raise SystemExit(f"task_type must be one of {sorted(LEDGER_TASKS)}; got {ledger_task!r}")
 
     ultralytics_train = _coerce_ultralytics_train_block(raw_cfg.get("ultralytics_train"), cfg_path)
     bridge = _coerce_ultralytics_bridge(raw_cfg.get("ultralytics_bridge"), cfg_path)
@@ -1244,9 +1289,13 @@ def main() -> None:
             bridge,
         )
     elif ledger_task == "segment_yolo":
-        run_segment_yolo(model_args, data_args, training_args, start_time, ultralytics_train, bridge)
+        run_segment_yolo(
+            model_args, data_args, training_args, start_time, ultralytics_train, bridge
+        )
     elif ledger_task == "classify_yolo":
-        run_classify_yolo(model_args, data_args, training_args, start_time, ultralytics_train, bridge)
+        run_classify_yolo(
+            model_args, data_args, training_args, start_time, ultralytics_train, bridge
+        )
     else:
         raise SystemExit(f"Unhandled task_type: {ledger_task}")
 

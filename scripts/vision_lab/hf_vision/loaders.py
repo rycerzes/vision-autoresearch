@@ -162,7 +162,12 @@ def load_hf_vision_model(
     )
     cfg_id = config_name or model_name_or_path
     proc_src = image_processor_name or model_name_or_path
-    image_processor = AutoImageProcessor.from_pretrained(proc_src, **common)
+
+    # SAM/SAM2 (`segment`) uses SamProcessor/Sam2Processor, not AutoImageProcessor.
+    # Loading AutoImageProcessor first can fail on repos without a valid processor_config.json.
+    image_processor = None
+    if task_type != "segment":
+        image_processor = AutoImageProcessor.from_pretrained(proc_src, **common)
 
     if task_type == "classify":
         if ml == "auto_task_head":

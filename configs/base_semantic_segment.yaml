@@ -10,8 +10,9 @@ adaptation_mode: full_finetune
 # Model
 model_name_or_path: nvidia/segformer-b0-finetuned-ade-512-512
 
-# Dataset (must be on HF Hub with image + semantic mask columns)
-dataset_name: segments/sidewalk-semantic
+# Dataset (HF Hub with `image` + mask column — see prepare.py semantic_segment contract).
+# Demo subset (~10 train / ~10 val)
+dataset_name: nielsr/ade20k-demo
 train_split: train
 eval_split: validation
 image_column_name: image

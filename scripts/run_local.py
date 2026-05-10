@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Run a vision autoresearch experiment locally (no HF Jobs)."""
+"""Run a vision autoresearch experiment locally (no HF Jobs).
+
+Uses CUDA_VISIBLE_DEVICES=0 when unset so single-GPU workstations pick GPU 0 by default.
+Export CUDA_VISIBLE_DEVICES yourself to override (other indices or multi-GPU policy).
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -27,6 +32,10 @@ _CLI_TASKS = list(all_task_ids())
 
 
 def main() -> int:
+    # Pin single-GPU workstations unless the caller already exported CUDA_VISIBLE_DEVICES.
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
     parser = argparse.ArgumentParser(description="Run a vision experiment locally.")
     parser.add_argument(
         "--task",
@@ -37,6 +46,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="Write log to this file")
     parser.add_argument(
         "--submit", action="store_true", help="Auto-submit result via submit_patch.py"
+    )
+    parser.add_argument(
+        "--comment",
+        default=None,
+        help="Comment for submit_patch.py when using --submit",
     )
     parser.add_argument(
         "--skip-preflight",
@@ -111,7 +125,7 @@ def main() -> int:
         print("Warning: no VISION AUTORESEARCH SUMMARY block found in output")
 
     if args.submit:
-        comment = args.comment or f"local {task} run"
+        comment = (args.comment or "").strip() or f"local {task} run"
         submit_argv = [
             sys.executable,
             str(ROOT / "scripts" / "submit_patch.py"),

@@ -230,3 +230,4 @@ outputs/
 
 tests/
 .runtime/
+*.yaml

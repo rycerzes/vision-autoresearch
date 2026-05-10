@@ -270,6 +270,12 @@ def validate_instance_segmentation_schema(features: dict, dataset_name: str) -> 
         "masks",
         "coco_mask",
         "png_mask",
+        # Dense-map style instance datasets used by the HF Mask2Former path.
+        "annotation",
+        "label",
+        "mask",
+        "segmentation",
+        "segmentation_mask",
     }
     if inst_cols:
         return []
@@ -289,7 +295,14 @@ def validate_panoptic_segmentation_schema(features: dict, dataset_name: str) -> 
         return errors
 
     panoptic_mask_cols = {c for c in column_names if "panoptic" in c.lower() and "mask" in c.lower()}
-    panoptic_mask_cols |= column_names & {"panoptic_mask", "panoptic_masks", "parsing"}
+    panoptic_mask_cols |= column_names & {
+        "panoptic_mask",
+        "panoptic_masks",
+        "parsing",
+        # Common Hub naming for panoptic id maps.
+        "label",
+        "annotation",
+    }
     seg_meta = column_names & {"segments", "segments_info", "panoptic_annotations", "categories"}
 
     if panoptic_mask_cols and seg_meta:

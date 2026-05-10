@@ -12,6 +12,7 @@ Adapted from huggingface/skills huggingface-vision-trainer.
 import logging
 import math
 import os
+import re
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -43,6 +44,9 @@ from vision_lab.hf_vision.summary_block import print_vision_autoresearch_summary
 
 logger = logging.getLogger(__name__)
 
+# Stateful eval metric when TrainingArguments.batch_eval_metrics is True (see Trainer.evaluation_loop).
+_eval_map_metric: MeanAveragePrecision | None = None
+
 
 # Helpers
 
@@ -55,18 +59,19 @@ class ModelOutput:
 def format_image_annotations_as_coco(
     image_id: str | int, categories: list[int], areas: list[float], bboxes: list[tuple[float]]
 ) -> dict[str, Any]:
-    sid = str(image_id)
+    """Build one image's COCO-style annotation dict for RT-DETR / DFine processors (image_id must be int)."""
+    iid = int(image_id) if isinstance(image_id, (int, np.integer)) else int(str(image_id))
     annotations = []
     for category, area, bbox in zip(categories, areas, bboxes):
         formatted_annotation = {
-            "image_id": sid,
+            "image_id": iid,
             "category_id": category,
             "iscrowd": 0,
             "area": area,
             "bbox": list(bbox),
         }
         annotations.append(formatted_annotation)
-    return {"image_id": sid, "annotations": annotations}
+    return {"image_id": iid, "annotations": annotations}
 
 
 def detect_bbox_format_from_samples(dataset, image_col="image", objects_col="objects", num_samples=50):
@@ -162,12 +167,18 @@ def sanitize_dataset(dataset, bbox_format="xywh", image_col="image", objects_col
 def convert_bbox_yolo_to_pascal(boxes: torch.Tensor, image_size: torch.Tensor | Sequence[int] | np.ndarray) -> torch.Tensor:
     boxes = cast(torch.Tensor, center_to_corners_format(cast(Any, boxes)))
     if isinstance(image_size, torch.Tensor):
-        hw = image_size.tolist()
+        flat = image_size.detach().cpu().reshape(-1).tolist()
     elif isinstance(image_size, np.ndarray):
-        hw = image_size.tolist()
+        flat = np.asarray(image_size).reshape(-1).tolist()
     else:
-        hw = list(image_size)
-    height, width = int(hw[0]), int(hw[1])
+        flat = list(image_size)
+    if len(flat) >= 2:
+        height, width = int(flat[0]), int(flat[1])
+    elif len(flat) == 1:
+        side = int(flat[0])
+        height, width = side, side
+    else:
+        raise ValueError(f"image_size must include height and width (got {flat!r})")
     boxes = boxes * torch.tensor([[width, height, width, height]])
     return boxes
 
@@ -220,54 +231,218 @@ def collate_fn(batch: list[BatchFeature]) -> dict[str, torch.Tensor | list[Any]]
     return data
 
 
+def _as_torch(t: Any) -> torch.Tensor:
+    if isinstance(t, torch.Tensor):
+        return t.detach().cpu()
+    return torch.tensor(t)
+
+
+def _hw_pair_tensor(orig: Any) -> torch.Tensor:
+    """Return shape ``[2]`` tensor ``(height, width)`` for RT-DETR ``target_sizes`` / box scaling."""
+    t = _as_torch(orig).reshape(-1)
+    if t.numel() >= 2:
+        return t[:2].clone()
+    if t.numel() == 1:
+        return t.expand(2).clone()
+    raise ValueError(f"orig_size must be non-empty (got {orig!r})")
+
+
+def _flatten_prediction_leaves(pred: Any, out: list[Any]) -> None:
+    """DFine / DETR may nest auxiliary dicts inside the ``prediction_step`` logits structure."""
+    if isinstance(pred, dict):
+        for v in pred.values():
+            _flatten_prediction_leaves(v, out)
+    elif isinstance(pred, (list, tuple)):
+        for x in pred:
+            _flatten_prediction_leaves(x, out)
+    elif isinstance(pred, np.ndarray) and pred.dtype == object:
+        for x in pred.tolist():
+            _flatten_prediction_leaves(x, out)
+    else:
+        out.append(pred)
+
+
+def _unpack_logits_boxes(predictions: Any, num_labels: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split DFine / RT-DETR outputs into logits [B,Q,C] and pred_boxes [B,Q,4].
+
+    Auxiliary decoder heads may expose many extra tensors; prefer the head whose class
+    dimension matches ``num_labels`` (when known) and whose query count matches the
+    primary box prediction tensor.
+    """
+    if predictions is None:
+        raise ValueError("predictions is None")
+    leaves: list[Any] = []
+    _flatten_prediction_leaves(predictions, leaves)
+    tensors_3d: list[torch.Tensor] = []
+    for x in leaves:
+        try:
+            t = _as_torch(x)
+        except (TypeError, RuntimeError):
+            continue
+        if t.dim() == 3:
+            tensors_3d.append(t)
+    boxes_candidates = [t for t in tensors_3d if t.shape[-1] == 4]
+    if len(boxes_candidates) < 1:
+        raise ValueError(f"No box tensor (last_dim==4) in predictions {predictions!r}")
+    boxes_t = max(boxes_candidates, key=lambda t: t.shape[1])
+    b, q, _ = boxes_t.shape
+    logits_matches = [
+        t for t in tensors_3d if t.shape[-1] != 4 and t.shape[0] == b and t.shape[1] == q
+    ]
+    if num_labels is not None:
+        capped = [t for t in logits_matches if t.shape[-1] <= num_labels + 2]
+        if capped:
+            logits_matches = capped
+    if not logits_matches:
+        raise ValueError(f"No logits tensor matching boxes {(b, q)} in predictions {predictions!r}")
+    logits_t = min(logits_matches, key=lambda t: t.shape[-1])
+    return logits_t, boxes_t
+
+
+def _per_image_label_dicts(label_ids: Any) -> list[dict[str, Any]]:
+    """Turn Trainer eval `label_ids` into one HF labels dict per image (CPU tensors)."""
+    if label_ids is None:
+        return []
+    if isinstance(label_ids, np.ndarray):
+        if label_ids.dtype == object:
+            label_ids = label_ids.tolist()
+        else:
+            raise TypeError(f"Unexpected label_ids ndarray dtype {label_ids.dtype}")
+    pad_token = -100
+    if isinstance(label_ids, dict):
+        boxes_b = _as_torch(label_ids["boxes"])
+        classes_b = _as_torch(label_ids["class_labels"])
+        if boxes_b.dim() != 3:
+            raise TypeError(f"Expected batched boxes [B,N,4], got shape {tuple(boxes_b.shape)}")
+        bsz = boxes_b.shape[0]
+        ob = _as_torch(label_ids["orig_size"])
+        if ob.dim() == 1:
+            if ob.numel() == 2:
+                orig_rows = ob.unsqueeze(0).expand(bsz, -1).clone()
+            elif ob.numel() == 2 * bsz:
+                orig_rows = ob.reshape(bsz, 2)
+            else:
+                raise ValueError(f"Unexpected 1D orig_size length {ob.numel()} for batch {bsz}")
+        elif ob.dim() == 2:
+            if ob.shape[0] == bsz:
+                orig_rows = ob[:, :2]
+            elif ob.shape[1] == bsz:
+                orig_rows = ob[:2, :].transpose(0, 1).contiguous()
+            else:
+                orig_rows = ob.reshape(bsz, -1)[:, :2]
+        else:
+            orig_rows = ob.reshape(bsz, -1)[:, :2]
+
+        out: list[dict[str, Any]] = []
+        for i in range(bsz):
+            cl = classes_b[i]
+            bx = boxes_b[i]
+            valid = cl.ne(pad_token)
+            if valid.any():
+                bx = bx[valid]
+                cl = cl[valid]
+            else:
+                bx = bx.new_zeros((0, 4))
+                cl = cl.new_zeros((0,), dtype=cl.dtype)
+            orig = orig_rows[i].reshape(-1)[:2]
+            out.append({"boxes": bx, "class_labels": cl.long(), "orig_size": orig})
+        return out
+    if isinstance(label_ids, (list, tuple)):
+        return [cast(dict[str, Any], x) for x in label_ids]
+    raise TypeError(f"Unexpected label_ids type {type(label_ids)!r}")
+
+
 @torch.no_grad()
 def compute_metrics(
     evaluation_results: EvalPrediction,
     image_processor: AutoImageProcessor,
     threshold: float = 0.0,
     id2label: Mapping[int, str] | None = None,
+    num_labels: int | None = None,
+    *,
+    compute_result: bool = False,
 ) -> Mapping[str, float]:
-    predictions, targets = evaluation_results.predictions, evaluation_results.label_ids
+    """Detection mAP; supports Transformers ``batch_eval_metrics`` (accumulate until ``compute_result``)."""
+    global _eval_map_metric
 
-    image_sizes = []
-    post_processed_targets = []
-    post_processed_predictions = []
+    predictions = evaluation_results.predictions
+    label_ids = evaluation_results.label_ids
 
-    for batch in targets:
-        batch_image_sizes = torch.tensor([x["orig_size"] for x in batch])
-        image_sizes.append(batch_image_sizes)
-        for image_target in batch:
-            boxes = torch.tensor(image_target["boxes"])
-            boxes = convert_bbox_yolo_to_pascal(boxes, image_target["orig_size"])
-            labels = torch.tensor(image_target["class_labels"])
-            post_processed_targets.append({"boxes": boxes, "labels": labels})
+    if predictions is None or label_ids is None:
+        if compute_result and _eval_map_metric is not None:
+            metrics = _eval_map_metric.compute()
+            _eval_map_metric = None
+            return _format_detection_metrics(metrics, id2label)
+        return {}
 
-    for batch, target_sizes in zip(predictions, image_sizes):
-        batch_logits, batch_boxes = batch[1], batch[2]
-        output = ModelOutput(logits=torch.tensor(batch_logits), pred_boxes=torch.tensor(batch_boxes))
-        post_processed_output = cast(Any, image_processor).post_process_object_detection(
-            output, threshold=threshold, target_sizes=target_sizes
+    batch_logits, batch_boxes = _unpack_logits_boxes(predictions, num_labels=num_labels)
+    image_entries = _per_image_label_dicts(label_ids)
+    if batch_logits.shape[0] != len(image_entries):
+        raise ValueError(
+            f"Batch size mismatch: logits batch {batch_logits.shape[0]} vs labels {len(image_entries)}"
         )
-        post_processed_predictions.extend(post_processed_output)
 
-    metric = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
-    metric.update(post_processed_predictions, post_processed_targets)
-    metrics = metric.compute()
+    target_sizes = torch.stack([_hw_pair_tensor(x["orig_size"]) for x in image_entries])
+    post_processed_targets = []
+    for image_target in image_entries:
+        boxes = _as_torch(image_target["boxes"])
+        boxes = convert_bbox_yolo_to_pascal(boxes, _hw_pair_tensor(image_target["orig_size"]))
+        labels = _as_torch(image_target["class_labels"]).long()
+        post_processed_targets.append({"boxes": boxes, "labels": labels})
 
-    classes = metrics.pop("classes")
-    map_per_class = metrics.pop("map_per_class")
-    mar_100_per_class = metrics.pop("mar_100_per_class")
-    if classes.dim() == 0:
-        classes = classes.unsqueeze(0)
-        map_per_class = map_per_class.unsqueeze(0)
-        mar_100_per_class = mar_100_per_class.unsqueeze(0)
-    for class_id, class_map, class_mar in zip(classes, map_per_class, mar_100_per_class):
-        class_name = id2label[class_id.item()] if id2label is not None else class_id.item()
-        metrics[f"map_{class_name}"] = class_map
-        metrics[f"mar_100_{class_name}"] = class_mar
+    output = ModelOutput(logits=batch_logits, pred_boxes=batch_boxes)
+    post_processed_predictions = cast(Any, image_processor).post_process_object_detection(
+        output, threshold=threshold, target_sizes=target_sizes
+    )
 
-    metrics = {k: round(v.item(), 4) for k, v in metrics.items()}
-    return metrics
+    if _eval_map_metric is None:
+        _eval_map_metric = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
+        _eval_map_metric.warn_on_many_detections = False
+    _eval_map_metric.update(post_processed_predictions, post_processed_targets)
+
+    if not compute_result:
+        return {}
+
+    metrics = _eval_map_metric.compute()
+    _eval_map_metric = None
+    return _format_detection_metrics(metrics, id2label)
+
+
+def _format_detection_metrics(
+    metrics: dict[str, torch.Tensor], id2label: Mapping[int, str] | None
+) -> dict[str, float]:
+    classes = metrics.pop("classes", None)
+    map_per_class = metrics.pop("map_per_class", None)
+    mar_pc_key = None
+    mar_candidates = [k for k in metrics if re.fullmatch(r"mar_\d+_per_class", k)]
+    if mar_candidates:
+        mar_pc_key = max(mar_candidates, key=lambda k: int(k.split("_")[1]))
+    mar_per_class = metrics.pop(mar_pc_key, None) if mar_pc_key else None
+    mar_suffix = mar_pc_key.split("_")[1] if mar_pc_key else "100"
+
+    if (
+        classes is not None
+        and map_per_class is not None
+        and mar_per_class is not None
+        and classes.numel() > 0
+    ):
+        if classes.dim() == 0:
+            classes = classes.unsqueeze(0)
+            map_per_class = map_per_class.unsqueeze(0)
+            mar_per_class = mar_per_class.unsqueeze(0)
+        for class_id, class_map, class_mar in zip(classes, map_per_class, mar_per_class):
+            cid = int(class_id.item())
+            if id2label is not None:
+                class_name = id2label.get(cid, f"class_{cid}")
+            else:
+                class_name = cid
+            metrics[f"map_{class_name}"] = class_map
+            metrics[f"mar_{mar_suffix}_{class_name}"] = class_mar
+
+    out: dict[str, float] = {}
+    for k, v in metrics.items():
+        out[k] = round(v.item(), 4) if isinstance(v, torch.Tensor) else round(float(v), 4)
+    return out
 
 
 # CLI dataclasses
@@ -395,10 +570,11 @@ def run_from_config(config_path: Path) -> None:
         dataset[split_name] = sanitize_dataset(dataset[split_name], bbox_format=bbox_format)
 
     for split_name in list(dataset.keys()):
-        if "image_id" not in dataset[split_name].column_names:
-            dataset[split_name] = dataset[split_name].add_column(
-                "image_id", list(range(len(dataset[split_name])))
-            )
+        ds_split = dataset[split_name]
+        # HF detection datasets often ship string image_id; RT-DETR image processors require int ids.
+        if "image_id" in ds_split.column_names:
+            ds_split = ds_split.remove_columns(["image_id"])
+        dataset[split_name] = ds_split.add_column("image_id", list(range(len(ds_split))))
 
     dataset["train"] = dataset["train"].shuffle(seed=training_args.seed)
 
@@ -501,13 +677,10 @@ def run_from_config(config_path: Path) -> None:
     max_size = data_args.image_square_size
     train_augment_and_transform = A.Compose(
         [
-            A.Compose(
-                [
-                    A.SmallestMaxSize(max_size=max_size, p=1.0),
-                    A.RandomSizedBBoxSafeCrop(height=max_size, width=max_size, p=1.0),
-                ],
-                p=0.2,
-            ),
+            # Always produce a fixed square before lighter augmentations. If random crop is skipped too often,
+            # inputs stay variable-sized → RT-DETR/DFine preprocess stacks / backbone strides break (OOM/off-by-one).
+            A.SmallestMaxSize(max_size=max_size, p=1.0),
+            A.RandomSizedBBoxSafeCrop(height=max_size, width=max_size, p=1.0),
             A.OneOf(
                 [
                     A.Blur(blur_limit=7, p=0.5),
@@ -516,16 +689,26 @@ def run_from_config(config_path: Path) -> None:
                 ],
                 p=0.1,
             ),
-            A.Perspective(p=0.1),
             A.HorizontalFlip(p=0.5),
             A.RandomBrightnessContrast(p=0.5),
             A.HueSaturationValue(p=0.1),
+            # Guarantee fixed `max_size` square for batched RT-DETR preprocess (Perspective/Perspective-like ops break stack).
+            A.Resize(height=max_size, width=max_size, p=1.0),
         ],
         bbox_params=A.BboxParams(format="coco", label_fields=["category"], clip=True, min_area=25),
     )
     validation_transform = A.Compose(
-        [A.NoOp()],
-        bbox_params=A.BboxParams(format="coco", label_fields=["category"], clip=True),
+        [
+            A.LongestMaxSize(max_size=max_size, p=1.0),
+            A.PadIfNeeded(
+                min_height=max_size,
+                min_width=max_size,
+                border_mode=0,
+                value=(0, 0, 0),
+            ),
+            A.CenterCrop(height=max_size, width=max_size, p=1.0),
+        ],
+        bbox_params=A.BboxParams(format="coco", label_fields=["category"], clip=True, min_area=25),
     )
 
     train_transform_batch = partial(
@@ -541,13 +724,15 @@ def run_from_config(config_path: Path) -> None:
     if "test" in dataset and eval_split != "test":
         dataset["test"] = dataset["test"].with_transform(validation_transform_batch)
 
-    def eval_compute_metrics_fn(eval_pred: EvalPrediction) -> dict[str, float]:
+    def eval_compute_metrics_fn(eval_pred: EvalPrediction, compute_result: bool = False) -> dict[str, float]:
         return dict(
             compute_metrics(
                 eval_pred,
                 image_processor=image_processor,
                 threshold=0.0,
                 id2label=id2label,
+                num_labels=getattr(model.config, "num_labels", None),
+                compute_result=compute_result,
             )
         )
 

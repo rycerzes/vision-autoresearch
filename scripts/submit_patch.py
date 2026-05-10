@@ -39,6 +39,7 @@ from vision_lab.promotion import (
     load_promotion_policy,
     policy_to_jsonable,
 )
+from vision_lab.compile_launch_contract import compile_config_file_to_path
 from vision_lab.task_registry import all_task_ids
 
 RUNTIME_DIR = ROOT / ".runtime"
@@ -68,10 +69,54 @@ def load_last_job() -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def resolve_config_path(task_type: str, explicit: str | None = None) -> Path:
+def resolve_config_path(
+    task_type: str,
+    explicit: str | None = None,
+    last_job: dict | None = None,
+) -> Path:
+    """Pick config YAML: explicit CLI, then path from last HF/local launch state, else base config."""
     if explicit:
-        return Path(explicit)
-    return CONFIGS_DIR / f"base_{task_type}.yaml"
+        return Path(explicit).expanduser().resolve()
+    if last_job:
+        cfg = last_job.get("config")
+        if isinstance(cfg, str) and cfg.strip():
+            candidate = Path(cfg).expanduser().resolve()
+            if candidate.is_file():
+                return candidate
+    return (CONFIGS_DIR / f"base_{task_type}.yaml").resolve()
+
+
+def resolve_record_contract_yaml(
+    *,
+    task_type: str,
+    config_path: Path,
+    c_hash: str,
+    explicit_contract: Path | None,
+    last_job: dict | None,
+) -> Path:
+    """Resolved RunContract YAML path for storing ``research/runs/<id>/contract.json``."""
+    if explicit_contract is not None:
+        p = explicit_contract.expanduser().resolve()
+        if not p.is_file():
+            raise SystemExit(f"Contract file not found: {p}")
+        return p
+    if last_job:
+        cp = last_job.get("contract_path")
+        if isinstance(cp, str) and cp.strip():
+            from_launch = Path(cp).expanduser().resolve()
+            if from_launch.is_file():
+                return from_launch
+    suffix = c_hash[:12] if c_hash else "nohash"
+    out = (
+        RUNTIME_DIR
+        / "compiled-contracts"
+        / f"record-{task_type}-{suffix}-contract.yaml"
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    compile_config_file_to_path(
+        task_id=task_type, config_path=config_path, output_path=out
+    )
+    return out
 
 
 def build_run_id(
@@ -121,7 +166,7 @@ def main() -> int:
         "--contract",
         type=Path,
         default=None,
-        help="Resolved RunContract YAML/JSON written alongside metrics as contract.json",
+        help="Optional RunContract YAML/JSON; if omitted, uses last HF launch compile or recompiles from config",
     )
     parser.add_argument(
         "--task", choices=_SUBMIT_TASK_CHOICES, help="Task type"
@@ -131,6 +176,7 @@ def main() -> int:
         "--dry-run", action="store_true", help="Preview without writing"
     )
     args = parser.parse_args()
+    last_job_state = load_last_job()
 
     if args.metrics_json:
         metrics = json.loads(args.metrics_json.read_text(encoding="utf-8"))
@@ -140,13 +186,16 @@ def main() -> int:
         if not metrics:
             raise SystemExit(f"No VISION AUTORESEARCH SUMMARY found in {args.log}")
     else:
-        last_job = load_last_job()
         log_key = next(
-            (k for k in ("cached_log_path", "output_log_path", "log_path") if k in (last_job or {})),
+            (
+                k
+                for k in ("cached_log_path", "output_log_path", "log_path")
+                if k in (last_job_state or {})
+            ),
             None,
         )
-        if last_job and log_key:
-            log_path = Path(last_job[log_key])
+        if last_job_state and log_key:
+            log_path = Path(last_job_state[log_key])
             if log_path.exists():
                 metrics = parse_summary(log_path.read_text(encoding="utf-8"))
             else:
@@ -161,7 +210,9 @@ def main() -> int:
         raise SystemExit(f"Unknown task type: {task_type!r}")
 
     config_path = resolve_config_path(
-        task_type, str(args.config) if args.config else None
+        task_type,
+        str(args.config) if args.config else None,
+        last_job_state,
     )
     c_hash = config_hash(config_path) if config_path.exists() else ""
 
@@ -206,7 +257,13 @@ def main() -> int:
 
     master_value = promotion_eval.baseline_value
 
-    job_id = args.job_id or ""
+    job_stripped = (args.job_id or "").strip()
+    prev_job = (
+        str(last_job_state.get("job_id", "") or "").strip()
+        if last_job_state
+        else ""
+    )
+    job_id = job_stripped or prev_job
     row = {
         "run_id": build_run_id(existing_rows, job_id or None, c_hash),
         "created_at": now_utc_iso(),
@@ -277,8 +334,20 @@ def main() -> int:
         "promotion_evaluation": evaluation_to_jsonable(promotion_eval),
     }
     write_run_metrics_artifact(appended["run_id"], metrics_payload)
-    if args.contract is not None:
-        write_run_contract_artifact(appended["run_id"], args.contract)
+    if config_path.is_file():
+        contract_yaml = resolve_record_contract_yaml(
+            task_type=task_type,
+            config_path=config_path,
+            c_hash=c_hash,
+            explicit_contract=args.contract,
+            last_job=last_job_state,
+        )
+        write_run_contract_artifact(appended["run_id"], contract_yaml)
+    else:
+        print(
+            f"Warning: config not found at {config_path}; skipped research/runs/.../contract.json",
+            file=sys.stderr,
+        )
 
     if truthy(appended["promoted"]):
         updated_rows = [*existing_rows, appended]

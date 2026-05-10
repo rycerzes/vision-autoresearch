@@ -22,6 +22,7 @@ _SCRIPTS_DIR = ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from vision_lab.compile_launch_contract import compile_config_file_to_path
 from vision_lab.preflight_report import (
     build_preflight_report,
     print_preflight_report,
@@ -353,7 +354,24 @@ def launch_job(args: argparse.Namespace) -> int:
     report = build_preflight_report(task, config_path)
     print_preflight_report(report)
     if report.get("errors"):
-        raise SystemExit("Preflight failed. Fix errors or pass --allow-preflight-fail.")
+        raise SystemExit("Preflight failed. Fix errors above.")
+
+    compiled_contract_path = (
+        RUNTIME_DIR / "compiled-contracts" / f"{task}-{config_path.stem}-hf-contract.yaml"
+    )
+    compiled_contract_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        compile_config_file_to_path(
+            task_id=task, config_path=config_path, output_path=compiled_contract_path
+        )
+    except SystemExit as exc:
+        raise SystemExit(
+            f"Contract compile failed before HF Job launch (fix config or dataset access): {exc}"
+        ) from exc
+    print(
+        f"Compiled RunContract for launch: {compiled_contract_path.relative_to(ROOT)}",
+        file=sys.stderr,
+    )
 
     bundle_path = RUNTIME_DIR / "vision-hf-job.py"
     bundle_text = build_bundle_script(task, config_path)
@@ -389,7 +407,8 @@ def launch_job(args: argparse.Namespace) -> int:
 
     state = {
         "task": task,
-        "config": str(config_path),
+        "config": str(config_path.resolve()),
+        "contract_path": str(compiled_contract_path.resolve()),
         "bundle_path": str(bundle_path),
         "flavor": flavor,
         "timeout": timeout,

@@ -104,7 +104,7 @@ def auto_map_columns(
     head_category: str,
     *,
     processor: Any | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Map dataset columns to model inputs.  Purely type-based.
 
     Uses processor capabilities when available, otherwise infers from
@@ -126,7 +126,7 @@ def auto_map_columns(
     else:
         proc_needs = ["image"]  # vision models always need images
 
-    mapping: dict[str, str] = {}
+    mapping: dict[str, Any] = {}
 
     image_cols = [c for c, t in col_types.items() if t in _IMAGE_TYPES]
 
@@ -147,6 +147,18 @@ def auto_map_columns(
     target = _find_target(col_types, head_category, used)
     if target is not None:
         mapping["target"] = target
+
+    # For detection-like targets, also map sub-fields within the structured dict
+    if (
+        "target" in mapping
+        and head_category in ("detection", "structured_detection")
+    ):
+        target_col = mapping["target"]
+        target_feat = features.get(target_col)
+        if target_feat is not None:
+            sub_map = auto_map_target_subfields(target_feat)
+            if sub_map:
+                mapping["target_subfields"] = sub_map
 
     logger.info("Auto-mapped columns for %s: %s", head_category, mapping)
     return mapping
@@ -211,3 +223,135 @@ def _find_target(
             return col
 
     return None
+
+
+def auto_map_target_subfields(feature: Any) -> dict[str, str] | None:
+    """Type-based sub-field mapping within a structured detection target.
+
+    Scans the HF feature schema of a structured dict column to identify
+    which sub-fields are bboxes, category labels, areas, etc.  Uses
+    *only* feature types — never field names.
+
+    Handles two common layouts:
+    - ``Sequence({"bbox": Sequence(float, 4), "category": ClassLabel, ...})``
+    - ``{"bbox": List(List(float, 4)), "category": List(ClassLabel), ...}``  (cppe-5 style)
+
+    Returns ``{"bbox": "actual_field", "category": "actual_field", ...}``
+    or ``None`` if no sub-fields can be identified.
+    """
+    # Get sub-field features from the structured target
+    sub_features = _unwrap_to_subfields(feature)
+    if sub_features is None or not sub_features:
+        return None
+
+    result: dict[str, str] = {}
+    first_int_field: str | None = None
+
+    for field_name, feat in sub_features.items():
+        # Unwrap one level of List/Sequence to get the per-object feature type
+        inner_feat = _unwrap_list(feat)
+
+        inner_type = classify_feature(inner_feat)
+
+        # ClassLabel → category
+        if inner_type == "classlabel" and "category" not in result:
+            result["category"] = field_name
+            continue
+
+        # Sequence/List of exactly 4 floats → bounding box
+        if _is_bbox_feature(inner_feat) and "bbox" not in result:
+            result["bbox"] = field_name
+            continue
+
+        # Variable-length float sequence → polygon/segmentation
+        if _is_polygon_feature(inner_feat) and "segmentation" not in result:
+            result["segmentation"] = field_name
+            continue
+
+        # Track first int field as potential category fallback
+        if inner_type in ("value_int", "value") and first_int_field is None:
+            first_int_field = field_name
+
+    # If no ClassLabel found, use the first integer as category
+    if "category" not in result and first_int_field is not None:
+        result["category"] = first_int_field
+
+    return result if result else None
+
+
+def _unwrap_to_subfields(feature: Any) -> dict[str, Any] | None:
+    """Extract sub-field features from a structured target column.
+
+    Handles bare dicts, Sequence(dict), and dict-of-Lists.
+    """
+    # Already a dict of features
+    if isinstance(feature, dict):
+        return dict(feature)
+
+    # Sequence(dict)
+    if hasattr(feature, "feature"):
+        inner = feature.feature
+        if isinstance(inner, dict):
+            return dict(inner)
+        if hasattr(inner, "keys"):
+            try:
+                return {k: inner[k] for k in inner.keys()}
+            except Exception:
+                pass
+
+    # Has .keys() (dict-like HF feature)
+    if hasattr(feature, "keys") and callable(getattr(feature, "keys")):
+        try:
+            keys = list(feature.keys())
+            return {k: feature[k] for k in keys}
+        except Exception:
+            pass
+
+    return None
+
+
+def _unwrap_list(feature: Any) -> Any:
+    """Unwrap one level of List/Sequence to get the per-item feature type.
+
+    ``List(ClassLabel)`` → ``ClassLabel``
+    ``List(List(float, 4))`` → ``List(float, 4)``  (which is a bbox)
+    ``Sequence(float, 4)`` → stays as-is (already a bbox feature)
+    """
+    type_name = type(feature).__name__
+    # HF datasets uses both "Sequence" and "LargeList" / "List" class
+    if type_name in ("Sequence", "LargeList", "List"):
+        inner = getattr(feature, "feature", None)
+        if inner is not None:
+            return inner
+    return feature
+
+
+def _is_bbox_feature(feature: Any) -> bool:
+    """Check if a feature looks like a bounding box: Sequence/List of 4 floats."""
+    type_name = type(feature).__name__
+    if type_name not in ("Sequence", "List", "LargeList"):
+        return False
+    length = getattr(feature, "length", -1)
+    if length != 4:
+        return False
+    inner_feat = getattr(feature, "feature", None)
+    if inner_feat is None:
+        return False
+    inner_type = classify_feature(inner_feat)
+    return inner_type in ("value_float", "value_int", "value")
+
+
+def _is_polygon_feature(feature: Any) -> bool:
+    """Check if a feature looks like a polygon: Sequence/List of floats (variable length)."""
+    type_name = type(feature).__name__
+    if type_name not in ("Sequence", "List", "LargeList"):
+        return False
+    length = getattr(feature, "length", -1)
+    if length == 4:  # that's a bbox, not a polygon
+        return False
+    inner_feat = getattr(feature, "feature", None)
+    if inner_feat is None:
+        return False
+    # Could be nested Sequence (list of polygons)
+    inner_type = classify_feature(inner_feat)
+    return inner_type in ("value_float", "sequence")

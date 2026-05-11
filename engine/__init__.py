@@ -6,14 +6,53 @@ dataset features. Two backends: HF Transformers and Ultralytics.
 
 from __future__ import annotations
 
+from engine.augmentation import (
+    AugmentationConfig,
+    AugmentationFamily,
+    build_eval_augmentation,
+    build_train_augmentation,
+    infer_augmentation_family,
+)
 from engine.backend import detect_backend, load_model
+from engine.collation import build_collate_fn
 from engine.introspection import HEAD_CATEGORIES, head_category_from_arch
-from engine.unified_model import UnifiedModel
+from engine.metrics import HEAD_METRICS, default_promotion_metric, get_direction
+from engine.pipeline import PipelineConfig, auto_infer_pipeline, summarize_pipeline
+from engine.preprocessing import (
+    PreprocessingConfig,
+    discover_preprocessing,
+    discover_ultralytics_preprocessing,
+)
+from engine.unified_model import ModuleInfo, UnifiedModel
 
 __all__ = [
-    "HEAD_CATEGORIES",
-    "UnifiedModel",
+    # Backend detection & loading
     "detect_backend",
-    "head_category_from_arch",
     "load_model",
+    # Introspection
+    "HEAD_CATEGORIES",
+    "head_category_from_arch",
+    # Unified model protocol
+    "UnifiedModel",
+    "ModuleInfo",
+    # Preprocessing
+    "PreprocessingConfig",
+    "discover_preprocessing",
+    "discover_ultralytics_preprocessing",
+    # Collation
+    "build_collate_fn",
+    # Augmentation
+    "AugmentationConfig",
+    "AugmentationFamily",
+    "build_train_augmentation",
+    "build_eval_augmentation",
+    "infer_augmentation_family",
+    # Metrics
+    "HEAD_METRICS",
+    "default_promotion_metric",
+    "get_direction",
+    # Pipeline
+    "PipelineConfig",
+    "auto_infer_pipeline",
+    "summarize_pipeline",
 ]

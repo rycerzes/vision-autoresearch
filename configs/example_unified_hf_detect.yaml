@@ -1,0 +1,33 @@
+# Unified config: HF Transformers detection (D-FINE on CPPE-5)
+# Usage: uv run train_vision.py configs/example_unified_hf_detect.yaml
+
+model_name_or_path: ustc-community/dfine-small-coco
+dataset_name: cppe-5
+
+# Universal training args (mapped to HF TrainingArguments automatically)
+num_train_epochs: 20
+per_device_train_batch_size: 8
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.1
+image_size: 640
+fp16: true
+seed: 42
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+save_total_limit: 2
+load_best_model_at_end: true
+logging_steps: 50
+
+# LR scheduler
+lr_scheduler_type: cosine
+
+# Output
+output_dir: ./output/dfine-cppe5
+
+# Optional HF-specific overrides
+# hf_train:
+#   gradient_accumulation_steps: 2
+#   warmup_steps: 500

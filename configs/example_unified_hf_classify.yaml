@@ -1,0 +1,31 @@
+# Unified config: HF classification (ViT on beans)
+# Usage: uv run train_vision.py configs/example_unified_hf_classify.yaml
+
+model_name_or_path: google/vit-base-patch16-224
+dataset_name: beans
+
+# Universal training args
+num_train_epochs: 10
+per_device_train_batch_size: 32
+learning_rate: 2.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.1
+image_size: 224
+fp16: true
+seed: 42
+
+# Evaluation
+eval_strategy: epoch
+save_strategy: epoch
+save_total_limit: 2
+load_best_model_at_end: true
+metric_for_best_model: accuracy
+
+# LR scheduler
+lr_scheduler_type: cosine
+
+# Output
+output_dir: ./output/vit-beans
+
+# Augmentation
+use_trivial_augment: true

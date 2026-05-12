@@ -23,6 +23,13 @@ from engine.preprocessing import (
     discover_preprocessing,
     discover_ultralytics_preprocessing,
 )
+from engine.training import (
+    UniversalTrainingArgs,
+    emit_summary,
+    parse_config_yaml,
+    to_hf_training_args,
+    to_ultralytics_train_kwargs,
+)
 from engine.unified_model import ModuleInfo, UnifiedModel
 
 __all__ = [
@@ -55,4 +62,10 @@ __all__ = [
     "PipelineConfig",
     "auto_infer_pipeline",
     "summarize_pipeline",
+    # Training
+    "UniversalTrainingArgs",
+    "parse_config_yaml",
+    "to_hf_training_args",
+    "to_ultralytics_train_kwargs",
+    "emit_summary",
 ]

@@ -161,16 +161,93 @@ class UltralyticsModel:
         return self._can_train
 
 
-    def train(self, train_dataset: Any, eval_dataset: Any, args: dict[str, Any]) -> dict[str, Any]:
+    def train(
+        self,
+        train_dataset: Any,
+        eval_dataset: Any,
+        args: dict[str, Any],
+        *,
+        pipeline_config: Any | None = None,
+        trainer_cls: type | None = None,
+    ) -> dict[str, Any]:
+        """Train using Ultralytics .train() API.
+
+        Parameters
+        ----------
+        train_dataset:
+            A ``UnifiedDataset`` instance (not yet exported).
+        eval_dataset:
+            Unused (Ultralytics uses val split from data.yaml).
+        args:
+            Dict of Ultralytics .train() kwargs (output of
+            ``to_ultralytics_train_kwargs``).
+        pipeline_config:
+            PipelineConfig (provides class_names for open-vocab models).
+        trainer_cls:
+            Explicit Ultralytics trainer class override.
+        """
         if not self._can_train:
             raise RuntimeError(
                 f"{self._cls_name} ({self._model_name}) does not support training. "
                 "Use research mode with modification.py for custom training."
             )
-        raise NotImplementedError("UltralyticsModel.train() not yet implemented")
 
-    def evaluate(self, dataset: Any) -> dict[str, Any]:
-        raise NotImplementedError("UltralyticsModel.evaluate() not yet implemented")
+        # Set classes for open-vocab models
+        if pipeline_config is not None and pipeline_config.class_names:
+            self.set_classes(pipeline_config.class_names)
+
+        # Train
+        if trainer_cls is not None:
+            logger.info("Using trainer class: %s", trainer_cls.__name__)
+            self._raw.train(trainer=trainer_cls, **args)
+        else:
+            self._raw.train(**args)
+
+        # Parse results
+        trainer = getattr(self._raw, "trainer", None)
+        save_dir = getattr(trainer, "save_dir", None) if trainer else None
+        self._run_dir = Path(save_dir).resolve() if save_dir else Path(args.get("project", "./output")) / "ultralytics"
+
+        from engine.training import (
+            read_ultralytics_eval_metrics,
+            read_ultralytics_train_metrics,
+        )
+
+        train_metrics = read_ultralytics_train_metrics(self._run_dir)
+        eval_metrics = read_ultralytics_eval_metrics(self._run_dir, self._head_category)
+
+        return {**train_metrics, **eval_metrics}
+
+    def evaluate(self, dataset: Any, *, data_yaml: Path | None = None) -> dict[str, Any]:
+        """Run validation.
+
+        If train() was called previously, reads metrics from the training run.
+        Otherwise, runs ``model.val(data=data_yaml)``.
+        """
+        from engine.training import read_ultralytics_eval_metrics
+
+        # If we have results from a recent train(), use those
+        if hasattr(self, "_run_dir") and self._run_dir is not None:
+            return read_ultralytics_eval_metrics(self._run_dir, self._head_category)
+
+        # Otherwise run val()
+        if data_yaml is None:
+            raise ValueError(
+                "Cannot evaluate without data_yaml. Either call train() first "
+                "or provide data_yaml path."
+            )
+
+        results = self._raw.val(data=str(data_yaml))
+        # Parse results object
+        metrics: dict[str, Any] = {}
+        if hasattr(results, "results_dict"):
+            for k, v in results.results_dict.items():
+                short_key = k.replace("metrics/", "").replace("(B)", "").replace("(M)", "").replace("(P)", "")
+                try:
+                    metrics[short_key] = float(v)
+                except (TypeError, ValueError):
+                    pass
+        return metrics
 
     def predict(self, image: Any) -> Any:
         return self._raw.predict(image)

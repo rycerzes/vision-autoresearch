@@ -1,0 +1,29 @@
+# Unified config: YOLOE open-vocabulary detection
+# Usage: uv run train_vision.py configs/example_unified_yoloe.yaml
+
+model_name_or_path: yoloe-l.pt
+dataset_name: cppe-5
+
+# Universal training args
+num_train_epochs: 50
+per_device_train_batch_size: 16
+learning_rate: 0.01
+image_size: 640
+fp16: true
+seed: 42
+
+# Output
+output_dir: ./output/yoloe-l-cppe5
+
+# Ultralytics-specific overrides
+ultralytics_train:
+  cos_lr: true
+  warmup_epochs: 3
+  patience: 30
+  # Explicit trainer class (optional — auto-resolved if omitted)
+  # trainer: YOLOEPESegTrainer
+
+# Ultralytics bridge config (optional)
+ultralytics_bridge:
+  sync_class_names: true
+  yoloe_training: full  # "full" or "linear_probe"

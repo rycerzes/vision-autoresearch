@@ -1,0 +1,28 @@
+# Unified config: Ultralytics YOLO detection (YOLO11n on CPPE-5)
+# Usage: uv run train_vision.py configs/example_unified_yolo_detect.yaml
+
+model_name_or_path: yolo11n.pt
+dataset_name: cppe-5
+
+# Universal training args (mapped to Ultralytics .train() automatically)
+# num_train_epochs → epochs, learning_rate → lr0,
+# per_device_train_batch_size → batch, image_size → imgsz, fp16 → amp
+num_train_epochs: 100
+per_device_train_batch_size: 16
+learning_rate: 0.01
+image_size: 640
+fp16: true
+seed: 42
+dataloader_num_workers: 4
+
+# Output
+output_dir: ./output/yolo11n-cppe5
+
+# Optional Ultralytics-specific overrides
+# ultralytics_train:
+#   mosaic: 1.0
+#   cos_lr: true
+#   warmup_epochs: 3
+#   patience: 50
+#   lr0: 0.01
+#   lrf: 0.01

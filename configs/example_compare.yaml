@@ -1,0 +1,48 @@
+# Comparison config: compare models across backends
+# Usage: uv run compare_vision.py configs/example_compare.yaml
+
+# Models to compare (any mix of HF + Ultralytics)
+models:
+  - facebook/detr-resnet-50            # HF — original DETR
+  - ustc-community/dfine-small-coco    # HF — D-FINE detector
+  - yolo11n.pt                         # Ultralytics — YOLO11 nano
+
+dataset_name: cppe-5
+
+# Comparison mode: zero_shot | finetuned | pareto
+comparison_mode: zero_shot
+
+# Latency benchmarking
+measure_latency: true
+num_latency_samples: 50
+num_warmup: 5
+num_latency_runs: 50
+
+# Image size for evaluation
+image_size: 640
+
+# Override primary metric (auto-derived from head_category if omitted)
+# primary_metric: mAP
+
+# Training args (only used in "finetuned" mode)
+# num_train_epochs: 10
+# per_device_train_batch_size: 16
+# learning_rate: 1.0e-4
+# weight_decay: 0.01
+# warmup_ratio: 0.1
+# lr_scheduler_type: cosine
+# fp16: true
+# seed: 42
+# freeze_backbone: false
+
+# Backend-specific overrides (finetuned mode only)
+# hf_train:
+#   gradient_accumulation_steps: 2
+# ultralytics_train:
+#   mosaic: 1.0
+
+# Limit eval samples (for quick testing)
+# max_eval_samples: 100
+
+# Output
+output_dir: ./output/comparison

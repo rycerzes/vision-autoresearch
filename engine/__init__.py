@@ -32,6 +32,17 @@ from engine.training import (
 )
 from engine.unified_model import ModuleInfo, UnifiedModel
 
+# Comparison
+from engine.comparison import (
+    ComparisonConfig,
+    ComparisonResult,
+    ModelResult,
+    format_leaderboard,
+    format_summary_block,
+    parse_comparison_config,
+    run_comparison,
+)
+
 # Lazy imports for research module (avoid torch import at package level
 # when only training utilities are needed)
 def _lazy_research():
@@ -75,4 +86,12 @@ __all__ = [
     "to_ultralytics_train_kwargs",
     "emit_summary",
     # Research (use engine.research directly for full API)
+    # Comparison
+    "ComparisonConfig",
+    "ComparisonResult",
+    "ModelResult",
+    "parse_comparison_config",
+    "run_comparison",
+    "format_leaderboard",
+    "format_summary_block",
 ]

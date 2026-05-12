@@ -375,7 +375,6 @@ class UnifiedDataset:
         else:
             raise ValueError(f"Unsupported Ultralytics task for export: {task!r}")
 
-    # ── YOLO export helpers ─────────────────────────────────────
 
     def _export_detection_yolo(
         self,
@@ -566,7 +565,6 @@ class UnifiedDataset:
         return yaml_path
 
 
-# ══ Module-level helpers ════════════════════════════════════════
 
 
 def _get_subfield(target: dict, role: str, subfield_map: dict[str, str] | None) -> Any | None:

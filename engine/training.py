@@ -16,7 +16,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# ══ Universal training arguments ════════════════════════════════
 
 
 @dataclass
@@ -114,7 +113,6 @@ def parse_config_yaml(yaml_path: str) -> UniversalTrainingArgs:
     return args
 
 
-# ══ Backend arg mapping ═════════════════════════════════════════
 
 
 def to_hf_training_args(args: UniversalTrainingArgs) -> dict[str, Any]:
@@ -216,7 +214,6 @@ def to_ultralytics_train_kwargs(
     return result
 
 
-# ══ Ultralytics metric parsing ══════════════════════════════════
 
 
 def pick_csv_metric(last_row: dict[str, str], keys: tuple[str, ...]) -> float:
@@ -332,7 +329,6 @@ def read_ultralytics_eval_metrics(
     return result
 
 
-# ══ Summary emission ════════════════════════════════════════════
 
 
 def emit_summary(
@@ -368,7 +364,6 @@ def emit_summary(
     print("--- END SUMMARY ---")
 
 
-# ══ Ultralytics trainer resolution ═════════════════════════════
 
 
 def resolve_ultralytics_trainer(

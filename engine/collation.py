@@ -63,7 +63,6 @@ def build_collate_fn(
     return _collate_generic
 
 
-# ── Collation implementations ──────────────────────────────────
 
 
 def _collate_classification(
@@ -230,7 +229,6 @@ def _collate_generic(
     return result
 
 
-# ── Helpers ─────────────────────────────────────────────────────
 
 
 def _pad_and_stack(tensors: list[torch.Tensor]) -> torch.Tensor:

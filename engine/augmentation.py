@@ -124,7 +124,6 @@ def build_eval_augmentation(
     return build_augmentation(config)
 
 
-# ── Albumentations builders ────────────────────────────────────
 
 
 def _build_albumentations(
@@ -323,7 +322,6 @@ def _build_albu_pair(
     return transform
 
 
-# ── Torchvision fallback ────────────────────────────────────────
 
 
 def _build_torchvision(

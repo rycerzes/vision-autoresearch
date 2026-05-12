@@ -31,7 +31,6 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 
-# ══ Research iteration tracking ═════════════════════════════════
 
 
 @dataclass
@@ -103,7 +102,6 @@ class ResearchState:
             )
 
 
-# ══ Modification loading and validation ═════════════════════════
 
 
 def load_modification_module(path: str | Path) -> Any | None:
@@ -150,7 +148,6 @@ def validate_modification(
     result = ValidationResult()
     result.params_before = model.num_parameters
 
-    # ── modify_model ────────────────────────────────────────────
     modify_model_fn = getattr(modification, "modify_model", None)
     if modify_model_fn is not None:
         try:
@@ -171,7 +168,6 @@ def validate_modification(
     else:
         result.params_after = result.params_before
 
-    # ── freeze_strategy ─────────────────────────────────────────
     freeze_fn = getattr(modification, "freeze_strategy", None)
     if freeze_fn is not None:
         try:
@@ -186,7 +182,6 @@ def validate_modification(
         result.trainable_params = model.num_trainable_parameters
         result.frozen_params = 0
 
-    # ── modify_loss (check it's callable) ───────────────────────
     modify_loss = getattr(modification, "modify_loss", None)
     if modify_loss is not None:
         if callable(modify_loss):
@@ -194,7 +189,6 @@ def validate_modification(
         else:
             result.errors.append("modify_loss is not callable")
 
-    # ── modify_metrics (check it's callable) ────────────────────
     modify_metrics = getattr(modification, "modify_metrics", None)
     if modify_metrics is not None:
         if callable(modify_metrics):
@@ -202,7 +196,6 @@ def validate_modification(
         else:
             result.errors.append("modify_metrics is not callable")
 
-    # ── modify_data (check it's callable) ───────────────────────
     modify_data = getattr(modification, "modify_data", None)
     if modify_data is not None:
         if callable(modify_data):
@@ -210,7 +203,6 @@ def validate_modification(
         else:
             result.errors.append("modify_data is not callable")
 
-    # ── custom_trainer_class ────────────────────────────────────
     custom_trainer_fn = getattr(modification, "custom_trainer_class", None)
     if custom_trainer_fn is not None:
         try:
@@ -220,7 +212,6 @@ def validate_modification(
         except Exception as e:
             result.errors.append(f"custom_trainer_class() failed: {e}")
 
-    # ── Zero trainable params check ─────────────────────────────
     if result.trainable_params == 0 and result.freeze_ok:
         result.warnings.append(
             "freeze_strategy left 0 trainable parameters — "
@@ -285,7 +276,6 @@ class ValidationResult:
         return "\n".join(lines)
 
 
-# ══ Architecture inspection ═════════════════════════════════════
 
 
 def inspect_architecture(model: Any) -> str:
@@ -304,7 +294,6 @@ def inspect_architecture(model: Any) -> str:
     lines.append(f"  Trainable:      {model.num_trainable_parameters:,}")
     lines.append("")
 
-    # ── Module roles ────────────────────────────────────────────
     lines.append("── Key Roles ──")
     roles = ["backbone", "classification_head", "bbox_head", "neck", "detect_head"]
     for role in roles:
@@ -319,7 +308,6 @@ def inspect_architecture(model: Any) -> str:
             pass
     lines.append("")
 
-    # ── Module graph (top-level children) ───────────────────────
     lines.append("── Top-Level Modules ──")
     nn_mod = model.nn_module
     for name, child in nn_mod.named_children():
@@ -331,7 +319,6 @@ def inspect_architecture(model: Any) -> str:
         )
     lines.append("")
 
-    # ── Detailed graph (first 3 levels) ─────────────────────────
     lines.append("── Detailed Graph (depth ≤ 3) ──")
     for name, mod in nn_mod.named_modules():
         if not name:
@@ -360,7 +347,6 @@ def inspect_architecture(model: Any) -> str:
 
     lines.append("")
 
-    # ── Class names ─────────────────────────────────────────────
     class_names = model.get_class_names()
     if class_names:
         if len(class_names) <= 20:
@@ -446,7 +432,6 @@ def inspect_module_detail(model: Any, path: str) -> str:
     return "\n".join(lines)
 
 
-# ══ Modification writing helpers ════════════════════════════════
 
 
 def write_modification(

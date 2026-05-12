@@ -1,0 +1,21 @@
+# Optimization config: optimize inference latency for D-FINE
+# Usage: uv run optimize_vision.py configs/example_optimize.yaml
+#
+# Edit experiments/optimization.py to define the optimization strategy.
+# See experiments/examples/opt_*.py for working examples.
+
+model_name_or_path: ustc-community/dfine-small-coco
+dataset_name: cppe-5
+
+# Optimization control
+optimization_module: experiments/optimization.py
+max_accuracy_drop: 0.02   # reject if accuracy drops more than 2%
+num_latency_samples: 100  # images for latency measurement
+num_warmup: 10            # warmup iterations
+num_runs: 100             # timed iterations
+
+# Image size (for export / resolution experiments)
+image_size: 640
+
+# Output
+output_dir: ./output/optimization

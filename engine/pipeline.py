@@ -32,43 +32,34 @@ class PipelineConfig:
     everything is derived from model and dataset metadata at runtime.
     """
 
-    # ── Identity ────────────────────────────────────────────────
     backend: str  # "hf" or "ultralytics"
     head_category: str  # "detection", "classification", etc.
     model_name: str
 
-    # ── Preprocessing ──────────────────────────────────────────
     image_size: tuple[int, int] = (224, 224)
     image_mean: tuple[float, ...] = (0.485, 0.456, 0.406)
     image_std: tuple[float, ...] = (0.229, 0.224, 0.225)
     modalities: list[str] = field(default_factory=lambda: ["image"])
     has_tokenizer: bool = False
 
-    # ── Column mapping ─────────────────────────────────────────
     column_map: dict[str, str] = field(default_factory=dict)
 
-    # ── Loss ────────────────────────────────────────────────────
     loss_mode: str = "builtin"  # "builtin" or "external"
     external_loss_fn: Callable[..., torch.Tensor] | None = None
 
-    # ── Metrics ─────────────────────────────────────────────────
     default_metrics: list[str] = field(default_factory=list)
     promotion_metric: str = ""
     promotion_direction: str = "higher"
 
-    # ── Augmentation ────────────────────────────────────────────
     augmentation_family: str = "image_only"
     train_augmentation: Callable[..., dict[str, Any]] | None = None
     eval_augmentation: Callable[..., dict[str, Any]] | None = None
 
-    # ── Collation ───────────────────────────────────────────────
     collate_fn: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None
 
-    # ── Class names ─────────────────────────────────────────────
     class_names: list[str] | None = None
     num_classes: int | None = None
 
-    # ── Warnings / notes ────────────────────────────────────────
     warnings: list[str] = field(default_factory=list)
 
 
@@ -112,25 +103,18 @@ def auto_infer_pipeline(
         model_name=getattr(model, "_model_name", "unknown"),
     )
 
-    # ── Step 1: Preprocessing discovery ─────────────────────────
     _discover_preprocessing(model, config, image_size_override)
 
-    # ── Step 2: Column mapping ──────────────────────────────────
     _resolve_column_map(model, dataset, config, column_map_override)
 
-    # ── Step 3: Loss auto-detection ─────────────────────────────
     _detect_loss(model, config)
 
-    # ── Step 4: Metric derivation ───────────────────────────────
     _derive_metrics(model, config)
 
-    # ── Step 5: Augmentation selection ──────────────────────────
     _build_augmentations(model, config, use_albumentations, use_trivial_augment, bbox_format)
 
-    # ── Step 6: Collation ───────────────────────────────────────
     _build_collation(model, config)
 
-    # ── Step 7: Class names ─────────────────────────────────────
     _resolve_class_names(model, dataset, config)
 
     logger.info(
@@ -148,7 +132,6 @@ def auto_infer_pipeline(
     return config
 
 
-# ── Step implementations ────────────────────────────────────────
 
 
 def _discover_preprocessing(
@@ -345,7 +328,6 @@ def _resolve_class_names(
     config.warnings.append("Could not determine class names or count")
 
 
-# ── Utility: summarize pipeline ─────────────────────────────────
 
 
 def summarize_pipeline(config: PipelineConfig) -> str:

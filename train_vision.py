@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     start_time = time.time()
 
-    # ── Parse config ────────────────────────────────────────────
     if len(sys.argv) < 2 or not sys.argv[1].endswith((".yaml", ".yml")):
         print("Usage: train_vision.py <config.yaml>", file=sys.stderr)
         sys.exit(1)
@@ -39,7 +38,6 @@ def main() -> None:
 
     args = parse_config_yaml(config_path)
 
-    # ── Setup logging ───────────────────────────────────────────
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -51,21 +49,18 @@ def main() -> None:
     logger.info("Model: %s", args.model_name_or_path)
     logger.info("Dataset: %s", args.dataset_name)
 
-    # ── Hub authentication ──────────────────────────────────────
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("hfjob")
     if hf_token:
         from huggingface_hub import login
         login(token=hf_token)
         logger.info("Logged in to Hugging Face Hub")
 
-    # ── Trackio ─────────────────────────────────────────────────
     try:
         import trackio
         trackio.init(project=args.output_dir, name=args.run_name or "train_vision")
     except ImportError:
         trackio = None  # type: ignore[assignment]
 
-    # ── Load model via unified API ──────────────────────────────
     from engine.backend import load_model
 
     model = load_model(
@@ -80,7 +75,6 @@ def main() -> None:
         f"{model.num_parameters:,}",
     )
 
-    # ── Load dataset via unified API ────────────────────────────
     from engine.unified_dataset import UnifiedDataset
 
     dataset = UnifiedDataset(
@@ -89,7 +83,6 @@ def main() -> None:
         trust_remote_code=args.trust_remote_code,
     )
 
-    # ── Auto-infer pipeline ─────────────────────────────────────
     from engine.pipeline import auto_infer_pipeline, summarize_pipeline
 
     pipeline_config = auto_infer_pipeline(
@@ -102,7 +95,6 @@ def main() -> None:
     )
     logger.info("\n%s", summarize_pipeline(pipeline_config))
 
-    # ── Apply research modifications (if present) ───────────────
     modification = _load_modification(args.modification_module)
     if modification is not None:
         # Validate modification before training
@@ -118,11 +110,9 @@ def main() -> None:
             modification, model, dataset, pipeline_config, args
         )
 
-    # ── Freeze backbone if requested ────────────────────────────
     if args.freeze_backbone:
         _freeze_backbone(model)
 
-    # ── Route to backend-specific training ──────────────────────
     import torch
 
     if torch.cuda.is_available():
@@ -133,7 +123,6 @@ def main() -> None:
     else:
         eval_metrics, train_metrics = _train_ultralytics(model, dataset, args, pipeline_config, modification)
 
-    # ── Emit summary ────────────────────────────────────────────
     training_seconds = time.time() - start_time
     peak_vram_mb = (
         torch.cuda.max_memory_allocated() / 1e6
@@ -151,7 +140,6 @@ def main() -> None:
         peak_vram_mb,
     )
 
-    # ── Trackio finish ──────────────────────────────────────────
     if trackio is not None:
         try:
             trackio.finish()
@@ -161,7 +149,6 @@ def main() -> None:
     logger.info("Training complete in %.1fs", training_seconds)
 
 
-# ══ HF Training ═════════════════════════════════════════════════
 
 
 def _train_hf(
@@ -231,7 +218,6 @@ def _train_hf(
     return eval_metrics, train_metrics
 
 
-# ══ Ultralytics Training ════════════════════════════════════════
 
 
 def _train_ultralytics(
@@ -308,7 +294,6 @@ def _train_ultralytics(
     return eval_metrics, train_metrics
 
 
-# ══ Research modifications ══════════════════════════════════════
 
 
 def _load_modification(module_path: str | None) -> Any | None:

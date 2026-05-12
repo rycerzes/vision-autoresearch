@@ -50,7 +50,6 @@ def discover_preprocessing(
     """
     config = PreprocessingConfig()
 
-    # ── Image size ──────────────────────────────────────────────
     if image_size_override is not None:
         if isinstance(image_size_override, int):
             config.image_size = (image_size_override, image_size_override)
@@ -59,7 +58,6 @@ def discover_preprocessing(
     else:
         config.image_size = _extract_image_size(processor)
 
-    # ── Normalization ───────────────────────────────────────────
     img_proc = _get_image_processor(processor)
     if img_proc is not None:
         mean = getattr(img_proc, "image_mean", None)
@@ -91,7 +89,6 @@ def discover_preprocessing(
             elif isinstance(pad_size, (list, tuple)) and len(pad_size) == 2:
                 config.pad_size = tuple(pad_size)  # type: ignore[arg-type]
 
-    # ── Modalities ──────────────────────────────────────────────
     config.modalities = _detect_modalities(processor)
     config.has_tokenizer = hasattr(processor, "tokenizer") and processor.tokenizer is not None
 
@@ -139,7 +136,6 @@ def discover_ultralytics_preprocessing(
     )
 
 
-# ── Internal helpers ────────────────────────────────────────────
 
 
 def _get_image_processor(processor: Any) -> Any | None:

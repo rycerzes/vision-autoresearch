@@ -32,6 +32,12 @@ from engine.training import (
 )
 from engine.unified_model import ModuleInfo, UnifiedModel
 
+# Lazy imports for research module (avoid torch import at package level
+# when only training utilities are needed)
+def _lazy_research():
+    from engine import research as _r
+    return _r
+
 __all__ = [
     # Backend detection & loading
     "detect_backend",
@@ -68,4 +74,5 @@ __all__ = [
     "to_hf_training_args",
     "to_ultralytics_train_kwargs",
     "emit_summary",
+    # Research (use engine.research directly for full API)
 ]

@@ -105,6 +105,15 @@ def main() -> None:
     # ── Apply research modifications (if present) ───────────────
     modification = _load_modification(args.modification_module)
     if modification is not None:
+        # Validate modification before training
+        validation = _validate_modification(model, modification, pipeline_config)
+        if not validation.valid:
+            logger.error(
+                "Modification validation FAILED:\n%s", validation.summary()
+            )
+            sys.exit(1)
+        logger.info("\n%s", validation.summary())
+
         model, dataset, pipeline_config = _apply_modification(
             modification, model, dataset, pipeline_config, args
         )
@@ -363,6 +372,23 @@ def _apply_modification(
         freeze_fn(model)
 
     return model, dataset, pipeline_config
+
+
+def _validate_modification(
+    model: Any,
+    modification: Any,
+    pipeline_config: Any,
+) -> Any:
+    """Validate modification before applying it."""
+    from engine.research import validate_modification
+
+    config = {
+        "head_category": model.head_category,
+        "image_size": pipeline_config.image_size,
+        "num_classes": pipeline_config.num_classes,
+        "class_names": pipeline_config.class_names,
+    }
+    return validate_modification(model, modification, config)
 
 
 def _freeze_backbone(model: Any) -> None:

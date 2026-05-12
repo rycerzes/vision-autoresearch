@@ -183,6 +183,87 @@ class HFModel:
     def num_trainable_parameters(self) -> int:
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
+    def adapt_num_classes(
+        self,
+        num_classes: int,
+        class_names: list[str] | None = None,
+    ) -> None:
+        """Adapt the model's output head to match the dataset's class count.
+
+        Reloads the model with the correct ``num_labels``, ``id2label``, and
+        ``label2id`` in the config.  Uses ``ignore_mismatched_sizes=True`` to
+        handle weight shape differences gracefully.
+        """
+        current_num_labels = getattr(self.config, "num_labels", None)
+        if current_num_labels == num_classes:
+            return
+
+        logger.info(
+            "Adapting model from %s classes to %s classes",
+            current_num_labels,
+            num_classes,
+        )
+
+        id2label = (
+            {i: name for i, name in enumerate(class_names)}
+            if class_names
+            else {i: f"class_{i}" for i in range(num_classes)}
+        )
+        label2id = {v: k for k, v in id2label.items()}
+
+        self.config.num_labels = num_classes
+        self.config.id2label = id2label
+        self.config.label2id = label2id
+
+        # Reload model with updated config
+        self.model = self._load_model_with_config(self._model_name, self.config)
+
+    def _load_model_with_config(self, model_name: str, config: Any) -> nn.Module:
+        """Reload model from pretrained with an explicit config."""
+        from transformers import (
+            AutoModelForDepthEstimation,
+            AutoModelForImageClassification,
+            AutoModelForImageSegmentation,
+            AutoModelForInstanceSegmentation,
+            AutoModelForMaskedImageModeling,
+            AutoModelForObjectDetection,
+            AutoModelForSemanticSegmentation,
+            AutoModelForUniversalSegmentation,
+            AutoModelForZeroShotObjectDetection,
+        )
+
+        archs = getattr(config, "architectures", None) or []
+        arch_name = archs[0] if archs else ""
+
+        _CATEGORY_TO_AUTO: dict[str, type] = {
+            "detection": AutoModelForObjectDetection,
+            "classification": AutoModelForImageClassification,
+            "dense_classification": AutoModelForSemanticSegmentation,
+            "dense_regression": AutoModelForDepthEstimation,
+            "self_supervised": AutoModelForMaskedImageModeling,
+        }
+
+        if "ForZeroShotObjectDetection" in arch_name:
+            auto_cls = AutoModelForZeroShotObjectDetection
+        elif "ForInstanceSegmentation" in arch_name:
+            auto_cls = AutoModelForInstanceSegmentation
+        elif "ForUniversalSegmentation" in arch_name:
+            auto_cls = AutoModelForUniversalSegmentation
+        elif "ForImageSegmentation" in arch_name:
+            auto_cls = AutoModelForImageSegmentation
+        else:
+            auto_cls = _CATEGORY_TO_AUTO.get(self._head_category)
+            if auto_cls is None:
+                from transformers import AutoModel
+                auto_cls = AutoModel
+
+        return auto_cls.from_pretrained(
+            model_name,
+            config=config,
+            trust_remote_code=True,
+            ignore_mismatched_sizes=True,
+        )
+
 
     def train(
         self,
@@ -312,7 +393,7 @@ class HFModel:
         if self._head_category == "classification":
             return self._compute_metrics_classification
         if self._head_category in ("detection", "structured_detection"):
-            return self._compute_metrics_detection
+            return self._make_detection_compute_metrics()
         if self._head_category in ("dense_classification",):
             return self._compute_metrics_segmentation
         return None
@@ -328,31 +409,108 @@ class HFModel:
         accuracy = (predictions == labels).mean()
         return {"accuracy": float(accuracy)}
 
-    def _compute_metrics_detection(self, eval_pred: Any) -> dict[str, float]:
-        """mAP metric for detection using torchmetrics."""
-        try:
+    def _make_detection_compute_metrics(self) -> Any:
+        """Build a detection compute_metrics closure with access to processor and config."""
+        processor = self.processor
+        config = self.config
+        id2label = getattr(config, "id2label", None)
+
+        def compute_metrics_detection(eval_pred: Any) -> dict[str, float]:
+            """mAP metric for detection via torchmetrics MeanAveragePrecision.
+
+            Post-processes model outputs using the image processor (NMS, box rescaling),
+            then computes COCO-style mAP.
+            """
             from torchmetrics.detection.mean_ap import MeanAveragePrecision
+            from transformers.image_transforms import center_to_corners_format
+
+            predictions, targets = eval_pred.predictions, eval_pred.label_ids
+
+            post_processed_targets: list[dict[str, Any]] = []
+            post_processed_predictions: list[dict[str, Any]] = []
+            image_sizes: list[Any] = []
+
+            for batch in targets:
+                batch_image_sizes = torch.tensor([x["orig_size"] for x in batch])
+                image_sizes.append(batch_image_sizes)
+                for image_target in batch:
+                    boxes = torch.tensor(image_target["boxes"])
+                    # Convert from center format to corners (xyxy)
+                    boxes = center_to_corners_format(boxes)
+                    orig_size = image_target["orig_size"]
+                    if isinstance(orig_size, (list, tuple)):
+                        h, w = orig_size
+                    else:
+                        h, w = orig_size.tolist() if hasattr(orig_size, "tolist") else (orig_size, orig_size)
+                    boxes = boxes * torch.tensor([[w, h, w, h]])
+                    labels = torch.tensor(image_target["class_labels"])
+                    post_processed_targets.append({"boxes": boxes, "labels": labels})
+
+            for batch, target_sizes in zip(predictions, image_sizes):
+                batch_logits, batch_boxes = batch[1], batch[2]
+
+                class ModelOutput:
+                    def __init__(self, logits, pred_boxes):
+                        self.logits = logits
+                        self.pred_boxes = pred_boxes
+
+                output = ModelOutput(
+                    logits=torch.tensor(batch_logits),
+                    pred_boxes=torch.tensor(batch_boxes),
+                )
+                post_processed_output = processor.post_process_object_detection(
+                    output, threshold=0.0, target_sizes=target_sizes
+                )
+                post_processed_predictions.extend(post_processed_output)
+
             metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox")
-            # Detection eval is complex — fall back to trainer's built-in if available
-            return {"mAP": 0.0, "mAP_50": 0.0}
-        except ImportError:
-            return {"mAP": 0.0, "mAP_50": 0.0}
+            metric.update(post_processed_predictions, post_processed_targets)
+            metrics = metric.compute()
+
+            # Remove per-class tensors, extract scalars
+            metrics.pop("classes", None)
+            metrics.pop("map_per_class", None)
+            metrics.pop("mar_100_per_class", None)
+
+            result = {k: round(v.item(), 4) for k, v in metrics.items() if hasattr(v, "item")}
+            # Map to standard keys
+            return {
+                "mAP": result.get("map", 0.0),
+                "mAP_50": result.get("map_50", 0.0),
+                "mAR": result.get("mar_100", 0.0),
+            }
+
+        return compute_metrics_detection
 
     @staticmethod
     def _compute_metrics_segmentation(eval_pred: Any) -> dict[str, float]:
-        """mIoU for segmentation."""
+        """Per-class mean IoU for segmentation."""
         import numpy as np
         logits, labels = eval_pred.predictions, eval_pred.label_ids
         if isinstance(logits, tuple):
             logits = logits[0]
-        # logits: (B, C, H, W)
         predictions = np.argmax(logits, axis=1)
-        # Simple mIoU calculation
-        valid = labels != 255  # ignore index
-        if not valid.any():
-            return {"miou": 0.0}
-        correct = (predictions == labels) & valid
-        miou = float(correct.sum()) / float(valid.sum())
+
+        ignore_index = 255
+        num_classes = logits.shape[1]
+
+        iou_per_class: list[float] = []
+        for cls_id in range(num_classes):
+            pred_mask = predictions == cls_id
+            true_mask = labels == cls_id
+            valid = labels != ignore_index
+
+            pred_mask = pred_mask & valid
+            true_mask = true_mask & valid
+
+            intersection = (pred_mask & true_mask).sum()
+            union = (pred_mask | true_mask).sum()
+
+            if union == 0:
+                continue
+            iou_per_class.append(float(intersection) / float(union))
+
+        miou = float(np.mean(iou_per_class)) if iou_per_class else 0.0
         return {"miou": miou}
 
     @staticmethod

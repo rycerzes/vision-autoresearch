@@ -83,6 +83,10 @@ def main() -> None:
         trust_remote_code=args.trust_remote_code,
     )
 
+    dataset.ensure_train_val_split(
+        val_fraction=args.train_val_split, seed=args.seed
+    )
+
     from engine.pipeline import auto_infer_pipeline, summarize_pipeline
 
     pipeline_config = auto_infer_pipeline(
@@ -94,6 +98,14 @@ def main() -> None:
         use_trivial_augment=args.use_trivial_augment,
     )
     logger.info("\n%s", summarize_pipeline(pipeline_config))
+
+    if pipeline_config.num_classes is not None:
+        from engine.hf_backend import HFModel
+        if isinstance(model, HFModel):
+            model.adapt_num_classes(
+                pipeline_config.num_classes,
+                class_names=pipeline_config.class_names,
+            )
 
     modification = _load_modification(args.modification_module)
     if modification is not None:

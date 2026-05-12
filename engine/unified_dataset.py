@@ -146,6 +146,36 @@ class UnifiedDataset:
                 return name
         return self._get_train_split()
 
+    def ensure_train_val_split(self, val_fraction: float = 0.15, seed: int = 42) -> None:
+        """Create a validation split if one doesn't already exist.
+
+        Splits the train set into train + validation using ``val_fraction``.
+        No-op if a validation/test split already exists.
+        """
+        for name in ("validation", "val", "test", "dev"):
+            if name in self.hf_dataset:
+                return
+
+        train_split = self._get_train_split()
+        if train_split not in self.hf_dataset:
+            return
+
+        logger.info(
+            "No validation split found — splitting %.0f%% from train (seed=%d)",
+            val_fraction * 100,
+            seed,
+        )
+        split_result = self.hf_dataset[train_split].train_test_split(
+            test_size=val_fraction, seed=seed
+        )
+        self.hf_dataset[train_split] = split_result["train"]
+        self.hf_dataset["validation"] = split_result["test"]
+        logger.info(
+            "Split: train=%d, validation=%d",
+            len(self.hf_dataset[train_split]),
+            len(self.hf_dataset["validation"]),
+        )
+
     @property
     def train_split_name(self) -> str:
         return self._get_train_split()
